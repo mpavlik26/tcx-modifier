@@ -9,43 +9,50 @@
   if($checkbox_preserveJustXth = isset($_POST["preserveJustXth"]))
     $xth = $_POST["xth"];
   
-  if($checkbox_setHR = isset($_POST["setHR"])){
+  $timestampsIntervalDefined = false;
+  $checkbox_setHR = isset($_POST["setHR"]);
+  $checkbox_shiftPositions = isset($_POST["shiftPositions"]);  
+  if($checkbox_setHR || $checkbox_shiftPositions){
     $setHRTimestampFromAsText = $_POST["setHRTimestampFrom"];
     $setHRTimestampToAsText = $_POST["setHRTimestampTo"];
-    $setHRTo = $_POST["setHRTo"];
 
-    if(!isset($setHRTimestampFromAsText) || !isset($setHRTimestampFromAsText)){
+    if(!isset($setHRTimestampFromAsText) || !isset($setHRTimestampFromAsText))
       echo "'From' or 'To' timestamp for setting HR to a new value were not specified";
-      $checkbox_setHR = false;
-    }
     else{
-      try{
-        $setHRTimestampFrom = (new DateTime($setHRTimestampFromAsText))->getTimestamp();
-        $setHRTimestampTo = (new DateTime($setHRTimestampToAsText))->getTimeStamp();
-        
-        if($setHRTimestampFrom > $setHRTimestampTo){
-          echo "'From' timestamp (" . $setHRTimestampFromAsText . ") is greater than 'To' timestamp (" . $setHRTimestampToAsText . ")";
-          $checkbox_setHR = false;
-        }
-        else{
-          if(!isset($setHRTo) || ($setHRTo < 30) || ($setHRTo > 270)){
-            echo "New value of HR the system should set is not specified or is out of the allowed range (from 30 to 270 bpm)";
-            $checkbox_setHR = false;
-          }
-        }
-      }
-      catch(Error $e){
-        echo "'From' or 'To' timestamps are specified incorrectly";
-        $checkbox_setHR = false;
+      $setHRTimestampFrom = (new DateTime($setHRTimestampFromAsText))->getTimestamp();
+      $setHRTimestampTo = (new DateTime($setHRTimestampToAsText))->getTimeStamp();
+      
+      if($setHRTimestampFrom > $setHRTimestampTo)
+        echo "'From' timestamp (" . $setHRTimestampFromAsText . ") is greater than 'To' timestamp (" . $setHRTimestampToAsText . ")";
+      else
+        $timestampsIntervalDefined = true;
+    }
+  }
+   
+  $setHRTo = 0;
+  $shiftLatitude = 0;
+  $shiftLongitude = 0;
+  
+  if($timestampsIntervalDefined){
+    if($checkbox_setHR){
+      if(isset($_POST["setHRTo"]))
+        $setHRTo = $_POST["setHRTo"];
+      
+      if(($setHRTo < 30) || ($setHRTo > 270)){
+        echo "New value of HR the system should set is not specified or is out of the allowed range (from 30 to 270 bpm)";
+        $setHRTo = 0;
       }
     }
     
-    if(!$checkbox_setHR)
-      echo " and that's why the system will not set HR to a new value.";
+    if($checkbox_shiftPositions){
+      $shiftLatitude = isset($_POST["shiftLatitude"]) ? $_POST["shiftLatitude"] : 0;
+      $shiftLongitude = isset($_POST["shiftLongitude"]) ? $_POST["shiftLongitude"] : 0;
+    }
   }
   
   echo "<br/>\n";
   //INPUT PARAMETERS - end
+
   
   if(!move_uploaded_file($fileFromForm["tmp_name"], $uploadFileName))
     exit("Unable to save uploaded file to uploads dir");
@@ -56,8 +63,8 @@
   if($checkbox_preserveJustXth)
     $tcx->preserveJustXth($xth);
   
-  if($checkbox_setHR)
-    $tcx->setHR($setHRTo, $setHRTimestampFrom, $setHRTimestampTo);
+  if($timestampsIntervalDefined)
+    $tcx->modifyTrackPoints($setHRTimestampFrom, $setHRTimestampTo, $setHRTo, $shiftLatitude, $shiftLongitude);
   
   $tcx->save($targetFileName);
   
@@ -116,15 +123,16 @@
     }
 
     
-    function setHR($hr, $timestampFrom, $timestampTo){
+    function modifyTrackPoints($timestampFrom, $timestampTo, $hr, $latitudeShift, $longitudeShift){
       $trackPoints = $this->getTrackPointsWithinTimestampsInterval($timestampFrom, $timestampTo);
-      //print_r($trackPoints);
       
       foreach($trackPoints as $trackPoint){
-        $trackPoint->setElementValue("n:HeartRateBpm/Value", $hr);
+        $trackPoint->setHR($hr);
+        $trackPoint->shiftLatitude($latitudeShift);
+        $trackPoint->shiftLongitude($longitudeShift);
       }
       
-      echo "HR (" . $hr . " bpm) was set to " . count($trackPoints) . " track points<br/>\n";
+      echo count($trackPoints) . " track point(s) were/was modified<br/>\n";
     }
     
     
@@ -144,10 +152,35 @@
       $this->xpathEngine = $xpathEngine;
     }
     
-    function setElementValue($xpath, $value){
-      $element = ($this->xpathEngine->query("n:HeartRateBpm/n:Value", $this->domElement))[0];
-      $element->nodeValue = $value;
+    
+    function setElementValue($xpath, $value, $isShift = false){//if $isShift is set to true, then new value = old value + $value 
+      $element = ($this->xpathEngine->query($xpath, $this->domElement))[0];
+      $element->nodeValue = $value + (($isShift) ? $element->nodeValue : 0);
     }
+    
+    
+    function shiftElementValue($xpath, $value){
+      $this->setElementValue($xpath, $value, true); 
+    }
+    
+    
+    function setHR($hr){
+      if($hr)
+        $this->setElementValue("n:HeartRateBpm/n:Value", $hr);  
+    }
+    
+
+    function shiftLatitude($shift){
+      if($shift)
+        $this->shiftElementValue("n:Position/n:LatitudeDegrees", $shift); 
+    }
+   
+    
+    function shiftLongitude($shift){
+      if($shift)
+        $this->shiftElementValue("n:Position/n:LongitudeDegrees", $shift); 
+    }
+    
   }
   
 ?>

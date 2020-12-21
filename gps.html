@@ -13,13 +13,23 @@
       <td><input type="checkbox" name="preserveJustXth" id="preserveJustXth"/>Every x-th record preserved</td>
       <td><input type="number" name="xth" id="xth" value="1"/></td>
     </tr>
+    <tr><td colspan="2">&nbsp;</td></tr>
+    <tr>
+      <td colspan="2">
+        <b>
+          from timestamp: <input type="datetime-local" step="1" name="setHRTimestampFrom" id="setHRTimestampFrom"/>
+          to timestamp: <input type="datetime-local" step="1" name="setHRTimestampTo" id="setHRTimestampTo"/>
+          :
+        </b>
+      </td>
+    </tr>
     <tr>
       <td><input type="checkbox" name="setHR" id="setHR"/>Set HR</td>
-      <td>
-        Set value to <input type="number" name="setHRTo" id="setHRTo"> bpm
-        from timestamp: <input type="datetime-local" step="1" name="setHRTimestampFrom" id="setHRTimestampFrom"/>
-        to timestamp: <input type="datetime-local" step="1" name="setHRTimestampTo" id="setHRTimestampTo"/>
-      </td>
+      <td>Set value to <input type="number" name="setHRTo" id="setHRTo"/> bpm</td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" name="shiftPositions" id="shiftPositions"/>Shift positions</td>
+      <td>Shift latitude by <input type="number" name="shiftLatitude" id="shiftLatitude" step="0.00001" value="0"/> and longitude by <input type="number" name="shiftLongitude" id="shiftLongitude" step="0.00001" value="0"/></td>
     </tr>
     <tr><td colspan="2">&nbsp;</td></tr>
     <tr align="center">
