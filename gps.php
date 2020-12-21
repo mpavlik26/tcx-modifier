@@ -10,24 +10,33 @@
     $xth = $_POST["xth"];
   
   if($checkbox_setHR = isset($_POST["setHR"])){
-    $setHRTimestampFrom = $_POST["setHRTimestampFrom"];
-    $setHRTimestampTo = $_POST["setHRTimestampTo"];
+    $setHRTimestampFromAsText = $_POST["setHRTimestampFrom"];
+    $setHRTimestampToAsText = $_POST["setHRTimestampTo"];
     $setHRTo = $_POST["setHRTo"];
 
-    if(!isset($setHRTimestampFrom) || !isset($setHRTimestampTo)){
+    if(!isset($setHRTimestampFromAsText) || !isset($setHRTimestampFromAsText)){
       echo "'From' or 'To' timestamp for setting HR to a new value were not specified";
       $checkbox_setHR = false;
     }
     else{
-      if($setHRTimestampFrom > $setHRTimestampTo){
-        echo "'From' timestamp (" . $setHRTimestampFrom . ") is greater than 'To' timestamp (" . $setHRTimestampTo . ")";
-        $checkbox_setHR = false;
-      }
-      else{
-        if(!isset($setHRTo) || ($setHRTo < 30) || ($setHRTo > 270)){
-          echo "New value of HR the system should set is not specified or is out of the allowed range (from 30 to 270 bpm)";
+      try{
+        $setHRTimestampFrom = (new DateTime($setHRTimestampFromAsText))->getTimestamp();
+        $setHRTimestampTo = (new DateTime($setHRTimestampToAsText))->getTimeStamp();
+        
+        if($setHRTimestampFrom > $setHRTimestampTo){
+          echo "'From' timestamp (" . $setHRTimestampFromAsText . ") is greater than 'To' timestamp (" . $setHRTimestampToAsText . ")";
           $checkbox_setHR = false;
         }
+        else{
+          if(!isset($setHRTo) || ($setHRTo < 30) || ($setHRTo > 270)){
+            echo "New value of HR the system should set is not specified or is out of the allowed range (from 30 to 270 bpm)";
+            $checkbox_setHR = false;
+          }
+        }
+      }
+      catch(Error $e){
+        echo "'From' or 'To' timestamps are specified incorrectly";
+        $checkbox_setHR = false;
       }
     }
     
@@ -47,6 +56,9 @@
   if($checkbox_preserveJustXth)
     $tcx->preserveJustXth($xth);
   
+  if($checkbox_setHR)
+    $tcx->setHR($setHRTo, $setHRTimestampFrom, $setHRTimestampTo);
+  
   $tcx->save($targetFileName);
   
   echo "Done";
@@ -54,7 +66,7 @@
   
   class TCXFile{
     public $xml;
-    public $xpath;
+    public $xpathEngine;
     
     
     function __construct($fileName){
@@ -62,16 +74,33 @@
       if(!$this->xml->load($fileName))
         exit("Unable to parse file '" . $fileName . "'");
 
-      $this->xpath = new DOMXpath($this->xml);
-      $this->xpath->registerNamespace("n", "http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2");
+      $this->xpathEngine = new DOMXpath($this->xml);
+      $this->xpathEngine->registerNamespace("n", "http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2");
+    }
+    
+
+    function getTrackPointsWithinTimestampsInterval($timestampFrom, $timestampTo){
+      $ret = array();
+      
+      $trackPoints = $this->xpathEngine->query("//n:Trackpoint");
+      
+      foreach($trackPoints as $trackPoint){
+        $timeNode = ($this->xpathEngine->query("n:Time", $trackPoint))[0]; 
+        $dateTime = new DateTime($timeNode->textContent);
+        $timestamp = $dateTime->getTimestamp();
+        
+        if($timestamp >= $timestampFrom && $timestamp <= $timestampTo)
+          array_push($ret, new TrackPoint($trackPoint, $this->xpathEngine));
+      }
+      return $ret;
     }
     
     
     function preserveJustXth($xth){
-      $tracks = $this->xpath->query("//n:Track");
+      $tracks = $this->xpathEngine->query("//n:Track");
       
       foreach($tracks as $track){
-        $trackpoints = $this->xpath->query("n:Trackpoint", $track);
+        $trackpoints = $this->xpathEngine->query("n:Trackpoint", $track);
         //print_r($trackpoints);
         
         $i = 0;
@@ -85,10 +114,39 @@
         }
       }
     }
+
+    
+    function setHR($hr, $timestampFrom, $timestampTo){
+      $trackPoints = $this->getTrackPointsWithinTimestampsInterval($timestampFrom, $timestampTo);
+      //print_r($trackPoints);
+      
+      foreach($trackPoints as $trackPoint){
+        $trackPoint->setElementValue("n:HeartRateBpm/Value", $hr);
+      }
+      
+      echo "HR (" . $hr . " bpm) was set to " . count($trackPoints) . " track points<br/>\n";
+    }
     
     
     function save($fileName){
       $this->xml->save($fileName); 
+    }
+  }
+  
+  
+  class TrackPoint{
+    public $domElement;
+    public $xpathEngine;
+    
+    
+    function __construct($domElement, $xpathEngine){
+      $this->domElement = $domElement; 
+      $this->xpathEngine = $xpathEngine;
+    }
+    
+    function setElementValue($xpath, $value){
+      $element = ($this->xpathEngine->query("n:HeartRateBpm/n:Value", $this->domElement))[0];
+      $element->nodeValue = $value;
     }
   }
   
