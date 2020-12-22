@@ -41,14 +41,8 @@
   $shiftLongitude = 0;
   
   if($timestampsIntervalDefined){
-    if($checkbox_setHR){
+    if($checkbox_setHR)
       $hr = inputParamsNvl("HR", 0);
-      
-      if(($hr < 30) || ($hr > 270)){
-        echo "New value of HR the system should set is not specified or is out of the allowed range (from 30 to 270 bpm)";
-        $hr = 0;
-      }
-    }
     
     if($checkbox_shiftPositions){
       $shiftLatitude = inputParamsNvl("shiftLatitude", 0);
@@ -125,9 +119,13 @@
       
       $trackPoints->preserveJustTrackPointsWithinTimestampsInterval($timestampFrom, $timestampTo);
 
-      $trackPoints->applyMethodOnTrackPoints("setHR", $hr);
-      $trackPoints->applyMethodOnTrackPoints("shiftLatitude", $latitudeShift);
-      $trackPoints->applyMethodOnTrackPoints("shiftLongitude", $longitudeShift);
+      $trackPoints->setProgressiveHR($hr);
+      
+      if($latitudeShift)
+        $trackPoints->applyMethodOnTrackPoints("shiftLatitude", $latitudeShift);
+      
+      if($longitudeShift)
+        $trackPoints->applyMethodOnTrackPoints("shiftLongitude", $longitudeShift);
       
       echo $trackPoints->count() . " track point(s) were/was modified<br/>\n";
     }
@@ -221,6 +219,24 @@
         
         if($timestamp < $timestampFrom || $timestamp > $timestampTo)
           unset($this->trackPoints[$timestamp]);
+      }
+    }
+    
+    
+    function setProgressiveHR($hr){//if ($hr == 0) then HR of the last trackPoint is used instead
+      $trackPointsCount = $this->count();
+      
+      if($trackPointsCount){
+        $firstHR = reset($this->trackPoints)->getHR();
+        $lastHR = ($hr) ? $hr : end($this->trackPoints)->getHR();
+        
+        $step = ($lastHR - $firstHR) / ($trackPointsCount - 1);
+        
+        $hr = $firstHR;
+        foreach($this->trackPoints as $trackPoint){
+          $trackPoint->setHR(round($hr));
+          $hr += $step;
+        }
       }
     }
     
