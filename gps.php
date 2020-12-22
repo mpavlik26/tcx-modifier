@@ -4,49 +4,49 @@
   $targetDir = "../target";
   $uploadFileName = $uploadsDir . "/" . $fileFromForm["name"];
   $targetFileName = $targetDir . "/" . $fileFromForm["name"];
-  
+
   //INPUT PARAMETERS - begin:
-  if($checkbox_preserveJustXth = isset($_POST["preserveJustXth"]))
-    $xth = $_POST["xth"];
+  
+  if($checkbox_preserveJustXth = inputCheckboxChecked("preserveJustXth"))
+    $xth = inputParamsNvl("xth", 1);
   
   $timestampsIntervalDefined = false;
-  $checkbox_setHR = isset($_POST["setHR"]);
-  $checkbox_shiftPositions = isset($_POST["shiftPositions"]);  
+  $checkbox_setHR = inputCheckboxChecked("setHR");
+  $checkbox_shiftPositions = inputCheckboxChecked("shiftPositions");  
   if($checkbox_setHR || $checkbox_shiftPositions){
-    $setHRTimestampFromAsText = $_POST["setHRTimestampFrom"];
-    $setHRTimestampToAsText = $_POST["setHRTimestampTo"];
+    $timestampFromAsText = $_POST["timestampFrom"];
+    $timestampToAsText = $_POST["timestampTo"];
 
-    if(!isset($setHRTimestampFromAsText) || !isset($setHRTimestampFromAsText))
-      echo "'From' or 'To' timestamp for setting HR to a new value were not specified";
+    if(!isset($timestampFromAsText) || !isset($timestampToAsText))
+      echo "'From' or 'To' timestamp were not specified";
     else{
-      $setHRTimestampFrom = (new DateTime($setHRTimestampFromAsText))->getTimestamp();
-      $setHRTimestampTo = (new DateTime($setHRTimestampToAsText))->getTimeStamp();
+      $timestampFrom = (new DateTime($timestampFromAsText))->getTimestamp();
+      $timestampTo = (new DateTime($timestampToAsText))->getTimeStamp();
       
-      if($setHRTimestampFrom > $setHRTimestampTo)
-        echo "'From' timestamp (" . $setHRTimestampFromAsText . ") is greater than 'To' timestamp (" . $setHRTimestampToAsText . ")";
+      if($timestampFrom > $timestampTo)
+        echo "'From' timestamp (" . $timestampFromAsText . ") is greater than 'To' timestamp (" . $timestampToAsText . ")";
       else
         $timestampsIntervalDefined = true;
     }
   }
    
-  $setHRTo = 0;
+  $hr = 0;
   $shiftLatitude = 0;
   $shiftLongitude = 0;
   
   if($timestampsIntervalDefined){
     if($checkbox_setHR){
-      if(isset($_POST["setHRTo"]))
-        $setHRTo = $_POST["setHRTo"];
+      $hr = inputParamsNvl("HR", 0);
       
-      if(($setHRTo < 30) || ($setHRTo > 270)){
+      if(($hr < 30) || ($hr > 270)){
         echo "New value of HR the system should set is not specified or is out of the allowed range (from 30 to 270 bpm)";
-        $setHRTo = 0;
+        $hr = 0;
       }
     }
     
     if($checkbox_shiftPositions){
-      $shiftLatitude = isset($_POST["shiftLatitude"]) ? $_POST["shiftLatitude"] : 0;
-      $shiftLongitude = isset($_POST["shiftLongitude"]) ? $_POST["shiftLongitude"] : 0;
+      $shiftLatitude = inputParamsNvl("shiftLatitude", 0);
+      $shiftLongitude = inputParamsNvl("shiftLongitude", 0);
     }
   }
   
@@ -64,7 +64,7 @@
     $tcx->preserveJustXth($xth);
   
   if($timestampsIntervalDefined)
-    $tcx->modifyTrackPoints($setHRTimestampFrom, $setHRTimestampTo, $setHRTo, $shiftLatitude, $shiftLongitude);
+    $tcx->modifyTrackPoints($timestampFrom, $timestampTo, $hr, $shiftLatitude, $shiftLongitude);
   
   $tcx->save($targetFileName);
   
@@ -181,6 +181,17 @@
         $this->shiftElementValue("n:Position/n:LongitudeDegrees", $shift); 
     }
     
+  }
+  
+  
+  function inputParamsNvl($name, $nvlValue){
+    $post = $GLOBALS["_POST"];
+    return (isset($post[$name])) ? $post[$name] : $nvlValue;
+  }
+  
+  
+  function inputCheckboxChecked($name){
+    return (isset($GLOBALS["_POST"][$name]));
   }
   
 ?>
