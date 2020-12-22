@@ -9,7 +9,8 @@
   $targetImagesDir = $targetDir . "/images";
   $uploadFileName = $uploadsDir . "/" . $fileFromForm["name"];
   $targetFileName = $targetDir . "/" . $fileFromForm["name"];
-
+  $movingAverageWindowSizeInSecond = 30; //it's used e.g. for moving average Watts ....
+  
 
   //INPUT PARAMETERS - begin:
   
@@ -65,7 +66,7 @@
     $tcx->preserveJustXth($xth);
   
   if($timestampsIntervalDefined)
-    $tcx->modifyTrackPoints($timestampFrom, $timestampTo, $hr, $shiftLatitude, $shiftLongitude);
+    $tcx->modifyTrackPoints($timestampFrom, $timestampTo, $checkbox_setHR, $hr, $shiftLatitude, $shiftLongitude);
 
   $tcx->displayGraph();
   
@@ -86,6 +87,7 @@
 
       $this->xpathEngine = new DOMXpath($this->xml);
       $this->xpathEngine->registerNamespace("n", "http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2");
+      $this->xpathEngine->registerNamespace("e", "http://www.garmin.com/xmlschemas/ActivityExtension/v2");
     }
 
 
@@ -114,12 +116,13 @@
     }
 
     
-    function modifyTrackPoints($timestampFrom, $timestampTo, $hr, $latitudeShift, $longitudeShift){
+    function modifyTrackPoints($timestampFrom, $timestampTo, $checkbox_setHR, $hr, $latitudeShift, $longitudeShift){
       $trackPoints = new TrackPoints($this);
       
       $trackPoints->preserveJustTrackPointsWithinTimestampsInterval($timestampFrom, $timestampTo);
 
-      $trackPoints->setProgressiveHR($hr);
+      if($checkbox_setHR)
+        $trackPoints->setProgressiveHR($hr);
       
       if($latitudeShift)
         $trackPoints->applyMethodOnTrackPoints("shiftLatitude", $latitudeShift);
@@ -150,6 +153,8 @@
       
       foreach($trackPointNodes as $trackPointNode)
         $this->add(new TrackPoint($trackPointNode, $this));
+      
+      $this->countMovingAverageWatts();
     }
     
     
@@ -164,7 +169,35 @@
       }
     }
     
+    
+    function areWattsAvailable(){
+      return ($this->count()) ? reset($this->trackPoints)->areWattsAvailable() : false;
+    }
+    
 
+    function countMovingAverageWatts(){
+      if($this->areWattsAvailable()){
+        $sum = 0;
+        $count = 0;
+        $leftBorderOfMovingWindowArray = $this->trackPoints;
+        $leftBorderOfMovingWindow = reset($leftBorderOfMovingWindowArray);
+        
+        foreach($this->trackPoints as $trackPoint){
+          $sum += $trackPoint->getWatts();
+          $count++;
+          
+          while($trackPoint->getTimestamp() - $GLOBALS["movingAverageWindowSizeInSecond"] > $leftBorderOfMovingWindow->getTimestamp()){
+            $sum -= $leftBorderOfMovingWindow->getWatts();
+            $count--;
+            $leftBorderOfMovingWindow = next($leftBorderOfMovingWindowArray);
+          }
+          
+          $trackPoint->setMovingAverageWatts(round($sum / $count));
+        }
+      }
+    }
+    
+    
     function getArrayByTrackPointMethod($trackPointMethodName){
       $ret = array();
       
@@ -181,29 +214,45 @@
     
     
     function displayGraph(){
-      $hrs = $this->getArrayByTrackPointMethod("getHR");
-      $altitudes = $this->getArrayByTrackPointMethod("getAltitude");
       $xs = $this->getArrayByTrackPointMethod("getTime");
-      
       $graphWidth = 1800;
-      // Create the graph. These two calls are always required
+
       $graph = new Graph($graphWidth, 500);
-      $graph->SetMargin(30,100,20,100);
+      $graph->SetMargin(30,140,20,100);
       $graph->SetScale('textlin');
       $graph->xaxis->SetTickLabels($xs);
       $graph->xaxis->SetTextTickInterval(ceil(20 / ($graphWidth / count($xs))));
       $graph->xaxis->SetLabelAngle(90);
- 
-      // Create the linear plot
+
+      $hrs = $this->getArrayByTrackPointMethod("getHR");
       $linePlotHR = new LinePlot($hrs);
       $graph->Add($linePlotHR);
+      $linePlotHR->SetColor('red');
       
+      $altitudes = $this->getArrayByTrackPointMethod("getAltitude");
       $linePlotAltitude = new LinePlot($altitudes);
       $graph->SetYScale(0, "lin");
       $graph->AddY(0, $linePlotAltitude);
+      $linePlotAltitude->SetColor('black');
       $graph->ynaxis[0]->SetColor('black');
-
-      // Display the graph
+      
+      if($this->areWattsAvailable()){
+        $watts = $this->getArrayByTrackPointMethod("getWatts");
+        $linePlotWatts = new LinePlot($watts);
+        $graph->SetYScale(1, "lin");
+        $graph->AddY(1, $linePlotWatts);
+        $linePlotWatts->SetColor('green');
+        $graph->ynaxis[1]->SetColor('green');
+        
+        $movingAverageWatts = $this->getArrayByTrackPointMethod("getMovingAverageWatts");
+        $linePlotMovingAverageWatts = new LinePlot($movingAverageWatts);
+        $graph->SetYScale(2, "lin");
+        $graph->AddY(2, $linePlotMovingAverageWatts);
+        $linePlotMovingAverageWatts->SetColor('magenta');
+        $graph->ynaxis[2]->SetColor('magenta');
+        
+      }
+      
       displayGraph($graph);
     }
     
@@ -218,10 +267,15 @@
         $timestamp = $trackPoint->getTimestamp();
         
         if($timestamp < $timestampFrom || $timestamp > $timestampTo)
-          unset($this->trackPoints[$timestamp]);
+          $this->remove($trackPoint);
       }
     }
     
+
+    function remove($trackPoint){
+      unset($this->trackPoints[$trackPoint->getTimestamp()]); 
+    }
+   
     
     function setProgressiveHR($hr){//if ($hr == 0) then HR of the last trackPoint is used instead
       $trackPointsCount = $this->count();
@@ -246,12 +300,24 @@
   class TrackPoint{
     public $domElement;
     public $trackPoints;
+    public $movingAverageWatts;
     
     function __construct($domElement, $trackPoints){
       $this->domElement = $domElement;
       $this->trackPoints = $trackPoints;
     }
 
+    
+    function areWattsAvailable(){
+      try{
+        $this->getWatts();
+        return true;
+      }
+      catch(Exception $e){
+        return false;
+      }
+    }
+    
     
     function getAltitude(){
       return $this->getElement("n:AltitudeMeters")->nodeValue;
@@ -274,6 +340,11 @@
     }
     
     
+    function getMovingAverageWatts(){
+      return $this->movingAverageWatts; 
+    }
+    
+    
     function getTime(){
       return $this->getDateTime()->format("H:i:s");
     }
@@ -281,6 +352,11 @@
     
     function getTimestamp(){//timestamp is a key in the array once trackpoints are organized in Trackpoints object
       return $this->getDateTime()->getTimestamp();  
+    }
+
+    
+    function getWatts(){
+      return $this->getElement("n:Extensions/e:TPX/e:Watts")->nodeValue;
     }
     
     
@@ -303,6 +379,11 @@
     function setHR($hr){
       if($hr)
         $this->setElementValue("n:HeartRateBpm/n:Value", $hr);  
+    }
+    
+    
+    function setMovingAverageWatts($movingAverageWatts){
+      $this->movingAverageWatts = $movingAverageWatts;  
     }
     
 
