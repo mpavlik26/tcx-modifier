@@ -25,7 +25,11 @@
     </tr>
     <tr>
       <td><input type="checkbox" name="setHR" id="setHR"/>Set HR</td>
-      <td>Set value to <input type="number" name="HR" id="HR"/> bpm</td>
+      <td>Set final value to <input type="number" name="HR" id="HR"/> bpm. Border hr values of the interval will be used if the final value is not specified.</td>
+    </tr>
+    <tr>
+      <td>&nbsp;</td>
+      <td>&nbsp;&nbsp;use the following interval to train system for hr estimation from watts: <input type="datetime-local" step="1" name="trainingTimestampFrom" id="trainingTimestampFrom"/>-<input type="datetime-local" step="1" name="trainingTimestampTo" id="trainingTimestampTo"/></td>
     </tr>
     <tr>
       <td><input type="checkbox" name="shiftPositions" id="shiftPositions"/>Shift positions</td>

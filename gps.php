@@ -1,5 +1,9 @@
 <?php
 
+  require_once "c:\\users\\Martin Pavlík\\vendor\\autoload.php";
+
+  use Phpml\Regression\LeastSquares;
+
   require_once ('jpgraph/src/jpgraph.php');
   require_once ('jpgraph/src/jpgraph_line.php');
 
@@ -9,7 +13,7 @@
   $targetImagesDir = $targetDir . "/images";
   $uploadFileName = $uploadsDir . "/" . $fileFromForm["name"];
   $targetFileName = $targetDir . "/" . $fileFromForm["name"];
-  $movingAverageWindowSizeInSecond = 30; //it's used e.g. for moving average Watts ....
+  $movingAverageWindowSizeInSecond = 45; //it's used e.g. for moving average Watts ....
   
 
   //INPUT PARAMETERS - begin:
@@ -17,31 +21,30 @@
   if($checkbox_preserveJustXth = inputCheckboxChecked("preserveJustXth"))
     $xth = inputParamsNvl("xth", 1);
   
-  $timestampsIntervalDefined = false;
   $checkbox_setHR = inputCheckboxChecked("setHR");
   $checkbox_shiftPositions = inputCheckboxChecked("shiftPositions");  
-  if($checkbox_setHR || $checkbox_shiftPositions){
-    $timestampFromAsText = $_POST["timestampFrom"];
-    $timestampToAsText = $_POST["timestampTo"];
+  $timestampIntervalForModification = new TimestampInterval();
 
-    if(!isset($timestampFromAsText) || !isset($timestampToAsText))
-      echo "'From' or 'To' timestamp were not specified";
-    else{
-      $timestampFrom = (new DateTime($timestampFromAsText))->getTimestamp();
-      $timestampTo = (new DateTime($timestampToAsText))->getTimeStamp();
+  if($checkbox_setHR || $checkbox_shiftPositions){
+    $timestampIntervalForModification->initFromParameters("timestampFrom", "timestampTo");
+    
+    if($timestampIntervalForModification->isError())
+      echo "There's a problem in specification of interval for modification: " . $timestampIntervalForModification->getErrorMessage() . "<br>\n";
+                                                                                                  
+    if($checkbox_setHR){
+      $timestampIntervalForTraining = new TimestampInterval();
+      $timestampIntervalForTraining->initFromParameters("trainingTimestampFrom", "trainingTimestampTo");
       
-      if($timestampFrom > $timestampTo)
-        echo "'From' timestamp (" . $timestampFromAsText . ") is greater than 'To' timestamp (" . $timestampToAsText . ")";
-      else
-        $timestampsIntervalDefined = true;
+      if($timestampIntervalForTraining->getError() == TimestampIntervalFromParametersErrorEnum::timestampFromIsGreaterThanTimestampTo)
+        echo "There's a problem in specification of interval for training: " . $timestampIntervalForTraining->getErrorMessage() . "<br>\n";
     }
-  }
+  } 
    
   $hr = 0;
   $shiftLatitude = 0;
   $shiftLongitude = 0;
   
-  if($timestampsIntervalDefined){
+  if(!($timestampIntervalForModification->isError())){
     if($checkbox_setHR)
       $hr = inputParamsNvl("HR", 0);
     
@@ -65,8 +68,8 @@
   if($checkbox_preserveJustXth)
     $tcx->preserveJustXth($xth);
   
-  if($timestampsIntervalDefined)
-    $tcx->modifyTrackPoints($timestampFrom, $timestampTo, $checkbox_setHR, $hr, $shiftLatitude, $shiftLongitude);
+  if(!($timestampIntervalForModification->isError()))
+    $tcx->modifyTrackPoints($timestampIntervalForModification, $checkbox_setHR, $hr, $timestampIntervalForTraining, $shiftLatitude, $shiftLongitude);
 
   $tcx->displayGraph();
   
@@ -116,13 +119,17 @@
     }
 
     
-    function modifyTrackPoints($timestampFrom, $timestampTo, $checkbox_setHR, $hr, $latitudeShift, $longitudeShift){
+    function modifyTrackPoints($timestampIntervalForModification, $checkbox_setHR, $hr, $timestampIntervalForTraining, $latitudeShift, $longitudeShift){
       $trackPoints = new TrackPoints($this);
       
-      $trackPoints->preserveJustTrackPointsWithinTimestampsInterval($timestampFrom, $timestampTo);
+      $trackPoints->filterAccordingToTimestampInterval($timestampIntervalForModification, true);
 
-      if($checkbox_setHR)
-        $trackPoints->setProgressiveHR($hr);
+      if($checkbox_setHR){
+        if($trackPoints->areWattsAvailable() && !$timestampIntervalForTraining->isError())
+           $trackPoints->setHRAccordingToMovingAverageWatts($hr, $timestampIntervalForTraining);
+        else
+          $trackPoints->setProgressiveHR($hr);
+      }
       
       if($latitudeShift)
         $trackPoints->applyMethodOnTrackPoints("shiftLatitude", $latitudeShift);
@@ -138,7 +145,80 @@
       $this->xml->save($fileName); 
     }
   }
+
   
+  class TimestampInterval{
+    protected $timestampFrom;
+    protected $timestampTo;
+    protected $error; //enum of class TimestampIntervalFromParametersErrorEnum
+    
+    
+    function __construct(){
+      $this->timestampFrom = null;
+      $this->timestampTo = null;
+      $this->error = TimestampIntervalFromParametersErrorEnum::someOrBothBorderValuesOfIntervalNotDefined;
+    }
+    
+    
+    function initFromParameters($timestampFromParameterName, $timestampToParameterName){
+      $timestampFromAsText = $GLOBALS["_POST"][$timestampFromParameterName];
+      $timestampToAsText = $GLOBALS["_POST"][$timestampToParameterName];
+      $this->initFromTextValues($timestampFromAsText, $timestampToAsText);
+    } 
+    
+    
+    function initFromTextValues($timestampFromAsText, $timestampToAsText){
+      if(!isset($timestampFromAsText) || !isset($timestampToAsText) || $timestampFromAsText == "" || $timestampToAsText == "")
+        $this->error = TimestampIntervalFromParametersErrorEnum::someOrBothBorderValuesOfIntervalNotDefined;
+      else
+        $this->initFromTimestamps((new DateTime($timestampFromAsText))->getTimestamp(), (new DateTime($timestampToAsText))->getTimeStamp());
+    }
+    
+      
+    function initFromTimestamps($timestampFrom, $timestampTo){
+      $this->timestampFrom = $timestampFrom;
+      $this->timestampTo = $timestampTo;
+    
+      $this->error = ($this->timestampFrom > $this->timestampTo) ? TimestampIntervalFromParametersErrorEnum::timestampFromIsGreaterThanTimestampTo : TimestampIntervalFromParametersErrorEnum::noError;
+    }
+
+    
+    function getErrorMessage(){
+      switch($this->error){
+        case TimestampIntervalFromParametersErrorEnum::someOrBothBorderValuesOfIntervalNotDefined: return "'From' or 'To' timestamp were not specified.";
+        case TimestampIntervalFromParametersErrorEnum::timestampFromIsGreaterThanTimestampTo: return "'From' timestamp is greater than 'To' timestamp.";
+        default: return "";
+      }
+    }
+
+    
+    function getTimestampFrom(){
+      return ($this->error) ? null : $this->timestampFrom;
+    }
+
+    
+    function getTimestampTo(){
+      return ($this->error) ? null : $this->timestampTo;
+    }
+    
+    
+    function getError(){
+      return $this->error; 
+    }
+    
+    
+    function isError(){
+      return ($this->error == TimestampIntervalFromParametersErrorEnum::noError) ? false : true; 
+    }
+  }
+
+
+  abstract class TimestampIntervalFromParametersErrorEnum{
+    const noError = 0;
+    const someOrBothBorderValuesOfIntervalNotDefined = -1;
+    const timestampFromIsGreaterThanTimestampTo = -2;
+  }  
+
   
   class TrackPoints{
     public $trackPoints; //array of TrackPoint
@@ -198,16 +278,6 @@
     }
     
     
-    function getArrayByTrackPointMethod($trackPointMethodName){
-      $ret = array();
-      
-      foreach($this->trackPoints as $trackPoint)
-        array_push($ret, $trackPoint->$trackPointMethodName());
-      
-      return $ret;
-    }
-    
-    
     function count(){
       return count($this->trackPoints);   
     }
@@ -257,16 +327,34 @@
     }
     
     
-    function getXpathEngine(){
-      return $this->tcxFile->xpathEngine; 
+    function getArrayByTrackPointMethod($trackPointMethodName){
+      $ret = array();
+      
+      foreach($this->trackPoints as $trackPoint)
+        array_push($ret, $trackPoint->$trackPointMethodName());
+      
+      return $ret;
     }
     
     
-    function preserveJustTrackPointsWithinTimestampsInterval($timestampFrom, $timestampTo){
+    function getAggregationByTrackPointMethod($aggregationMethod, $trackPointMethodName){//example of usage: getAggregationByTrackPointMethod("min", "getHR"); ... finds the minimal HR
+      $values = $this->getArrayByTrackPointMethod($trackPointMethodName);
+      
+      return $aggregationMethod($values);
+    }
+
+    
+    function getXpathEngine(){
+      return $this->tcxFile->xpathEngine; 
+    }
+                                                                          
+    
+    function filterAccordingToTimestampInterval($timestampInterval, $preserve){//$preserve: true -> only trackPoints in interval remains; false -> only trackPoints not in interval remains
       foreach($this->trackPoints as $trackPoint){
         $timestamp = $trackPoint->getTimestamp();
+        $isInInterval = ($timestamp >= $timestampInterval->getTimestampFrom() && $timestamp <= $timestampInterval->getTimestampTo());
         
-        if($timestamp < $timestampFrom || $timestamp > $timestampTo)
+        if($preserve && !$isInInterval || !$preserve && $isInInterval)
           $this->remove($trackPoint);
       }
     }
@@ -276,6 +364,33 @@
       unset($this->trackPoints[$trackPoint->getTimestamp()]); 
     }
    
+    
+    function setHRAccordingToMovingAverageWatts($hr, $timestampIntervalForTraining){//if ($hr == 0) then HR of the last trackPoint is used instead
+      if($this->areWattsAvailable() && !$timestampIntervalForTraining->isError()){
+        if($hr)
+          end($this->trackPoints)->setHR($hr);
+
+        $trainingTrackPoints = new TrackPoints($this->tcxFile);
+        $trainingTrackPoints->filterAccordingToTimestampInterval($timestampIntervalForTraining, true);
+        
+        if($trainingTrackPoints->count() > 0){
+          $movingAverageWatts = addDimensionToArray($trainingTrackPoints->getArrayByTrackPointMethod("getMovingAverageWatts"));
+          $hrs = $trainingTrackPoints->getArrayByTrackPointMethod("getHR");
+          
+          $ls = new LeastSquares();
+          $ls->train($movingAverageWatts, $hrs);
+  
+          foreach($this->trackPoints as $trackPoint){
+            $trackPoint->setHR(round($ls->predict([$trackPoint->getMovingAverageWatts()]))); 
+          }
+        }
+        else{
+          echo "Training interval doesn't match to input tcx file and that's why progressive setting of HR is used instead of estimation based on watts.<br/>\n";
+          $this->setProgressiveHR($hr);
+        }
+      }
+    }
+    
     
     function setProgressiveHR($hr){//if ($hr == 0) then HR of the last trackPoint is used instead
       $trackPointsCount = $this->count();
@@ -309,13 +424,7 @@
 
     
     function areWattsAvailable(){
-      try{
-        $this->getWatts();
-        return true;
-      }
-      catch(Exception $e){
-        return false;
-      }
+      return !is_null($this->getWatts());
     }
     
     
@@ -356,7 +465,9 @@
 
     
     function getWatts(){
-      return $this->getElement("n:Extensions/e:TPX/e:Watts")->nodeValue;
+      $element = $this->getElement("n:Extensions/e:TPX/e:Watts");
+
+      return ($element) ? $element->nodeValue : null;
     }
     
     
@@ -397,7 +508,6 @@
       if($shift)
         $this->shiftElementValue("n:Position/n:LongitudeDegrees", $shift); 
     }
-    
   }
   
   
@@ -416,6 +526,17 @@
   
   function inputCheckboxChecked($name){
     return (isset($GLOBALS["_POST"][$name]));
+  }
+
+  
+  function addDimensionToArray($inputArray){
+    $ret = array();
+    
+    foreach($inputArray as $key => $value){
+      $ret[$key] = [$value]; 
+    }
+    
+    return $ret;
   }
   
 ?>
