@@ -1,5 +1,19 @@
 <?php
 
+require_once "c:\\users\\Martin Pavlík\\vendor\\autoload.php";
+
+/*
+use Phpml\Regression\LeastSquares;
+
+$watts = [[1, 500], [2, 450], [7, 400], [8, 420], [10, 500]];
+$hrs = [160, 150, 140, 144, 165];
+
+$ls = new LeastSquares();
+$ls->train($watts, $hrs);
+
+echo $ls->predict([6, 450]);
+*/
+
   require_once ('jpgraph/src/jpgraph.php');
   require_once ('jpgraph/src/jpgraph_line.php');
 
@@ -9,7 +23,7 @@
   $targetImagesDir = $targetDir . "/images";
   $uploadFileName = $uploadsDir . "/" . $fileFromForm["name"];
   $targetFileName = $targetDir . "/" . $fileFromForm["name"];
-  $movingAverageWindowSizeInSecond = 30; //it's used e.g. for moving average Watts ....
+  $movingAverageWindowSizeInSecond = 45; //it's used e.g. for moving average Watts ....
   
 
   //INPUT PARAMETERS - begin:
@@ -198,16 +212,6 @@
     }
     
     
-    function getArrayByTrackPointMethod($trackPointMethodName){
-      $ret = array();
-      
-      foreach($this->trackPoints as $trackPoint)
-        array_push($ret, $trackPoint->$trackPointMethodName());
-      
-      return $ret;
-    }
-    
-    
     function count(){
       return count($this->trackPoints);   
     }
@@ -257,6 +261,23 @@
     }
     
     
+    function getArrayByTrackPointMethod($trackPointMethodName){
+      $ret = array();
+      
+      foreach($this->trackPoints as $trackPoint)
+        array_push($ret, $trackPoint->$trackPointMethodName());
+      
+      return $ret;
+    }
+    
+    
+    function getAggregationByTrackPointMethod($aggregationMethod, $trackPointMethodName){//example of usage: getAggregationByTrackPointMethod("min", "getHR"); ... finds the minimal HR
+      $values = $this->getArrayByTrackPointMethod($trackPointMethodName);
+      
+      return $aggregationMethod($values);
+    }
+
+    
     function getXpathEngine(){
       return $this->tcxFile->xpathEngine; 
     }
@@ -276,6 +297,40 @@
       unset($this->trackPoints[$trackPoint->getTimestamp()]); 
     }
    
+    
+    function setHRAccordingToMovingAverageWatts($hr){//if ($hr == 0) then HR of the last trackPoint is used instead
+      if($this->areWattsAvailable()){
+        $firstTrackPoint = reset($this->trackPoints);
+        $lastTrackPoint = end($this->trackPoints);
+        
+        if($hr)
+          $lastTrackPoint->setHR($hr);
+        
+        $firstHR = $firstTrackPoint->getHR();
+        $lastHR = $lastTrackPoint->getHR();
+        
+        $firstMAWatts = $firstTrackPoint->getMovingAverageWatts();
+        $lastMAWatts = $lastTrackPoint->getMovingAverageWatts();
+        $maxMAWatts = $this->getAggregationByTrackPointMethod("max", "getMovingAverageWatts");
+        $minMAWatts = $this->getAggregationByTrackPointMethod("min", "getMovingAverageWatts");
+        $spreadMAWatts = $maxMAWatts - $minMAWatts;
+        
+      }
+      
+      $trackPointsCount = $this->count();
+      
+      if($trackPointsCount){
+        
+        $step = ($lastHR - $firstHR) / ($trackPointsCount - 1);
+        
+        $hr = $firstHR;
+        foreach($this->trackPoints as $trackPoint){
+          $trackPoint->setHR(round($hr));
+          $hr += $step;
+        }
+      }
+    }
+    
     
     function setProgressiveHR($hr){//if ($hr == 0) then HR of the last trackPoint is used instead
       $trackPointsCount = $this->count();
