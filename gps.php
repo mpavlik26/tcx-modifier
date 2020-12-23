@@ -31,31 +31,30 @@ echo $ls->predict([6, 450]);
   if($checkbox_preserveJustXth = inputCheckboxChecked("preserveJustXth"))
     $xth = inputParamsNvl("xth", 1);
   
-  $timestampsIntervalDefined = false;
   $checkbox_setHR = inputCheckboxChecked("setHR");
   $checkbox_shiftPositions = inputCheckboxChecked("shiftPositions");  
-  if($checkbox_setHR || $checkbox_shiftPositions){
-    $timestampFromAsText = $_POST["timestampFrom"];
-    $timestampToAsText = $_POST["timestampTo"];
+  $timestampIntervalForModification = new TimestampInterval();
 
-    if(!isset($timestampFromAsText) || !isset($timestampToAsText))
-      echo "'From' or 'To' timestamp were not specified";
-    else{
-      $timestampFrom = (new DateTime($timestampFromAsText))->getTimestamp();
-      $timestampTo = (new DateTime($timestampToAsText))->getTimeStamp();
+  if($checkbox_setHR || $checkbox_shiftPositions){
+    $timestampIntervalForModification->initFromParameters("timestampFrom", "timestampTo");
+    
+    if($timestampIntervalForModification->isError())
+      echo "There's a problem in specification of interval for modification: " . $timestampIntervalForModification->getErrorMessage() . "<br>\n";
+                                                                                                  
+    if($checkbox_setHR){
+      $timestampIntervalForTraining = new TimestampInterval();
+      $timestampIntervalForTraining->initFromParameters("trainingTimestampFrom", "trainingTimestampTo");
       
-      if($timestampFrom > $timestampTo)
-        echo "'From' timestamp (" . $timestampFromAsText . ") is greater than 'To' timestamp (" . $timestampToAsText . ")";
-      else
-        $timestampsIntervalDefined = true;
+      if($timestampIntervalForTraining->getError() == TimestampIntervalFromParametersErrorEnum::timestampFromIsGreaterThanTimestampTo)
+        echo "There's a problem in specification of interval for training: " . $timestampIntervalForTraining->getErrorMessage() . "<br>\n";
     }
-  }
+  } 
    
   $hr = 0;
   $shiftLatitude = 0;
   $shiftLongitude = 0;
   
-  if($timestampsIntervalDefined){
+  if(!($timestampIntervalForModification->isError())){
     if($checkbox_setHR)
       $hr = inputParamsNvl("HR", 0);
     
@@ -79,8 +78,8 @@ echo $ls->predict([6, 450]);
   if($checkbox_preserveJustXth)
     $tcx->preserveJustXth($xth);
   
-  if($timestampsIntervalDefined)
-    $tcx->modifyTrackPoints($timestampFrom, $timestampTo, $checkbox_setHR, $hr, $shiftLatitude, $shiftLongitude);
+  if(!($timestampIntervalForModification->isError()))
+    $tcx->modifyTrackPoints($timestampIntervalForModification, $checkbox_setHR, $hr, $shiftLatitude, $shiftLongitude);
 
   $tcx->displayGraph();
   
@@ -130,10 +129,10 @@ echo $ls->predict([6, 450]);
     }
 
     
-    function modifyTrackPoints($timestampFrom, $timestampTo, $checkbox_setHR, $hr, $latitudeShift, $longitudeShift){
+    function modifyTrackPoints($timestampInterval, $checkbox_setHR, $hr, $latitudeShift, $longitudeShift){
       $trackPoints = new TrackPoints($this);
       
-      $trackPoints->preserveJustTrackPointsWithinTimestampsInterval($timestampFrom, $timestampTo);
+      $trackPoints->preserveJustTrackPointsWithinTimestampsInterval($timestampInterval);
 
       if($checkbox_setHR)
         $trackPoints->setProgressiveHR($hr);
@@ -152,7 +151,80 @@ echo $ls->predict([6, 450]);
       $this->xml->save($fileName); 
     }
   }
+
   
+  class TimestampInterval{
+    protected $timestampFrom;
+    protected $timestampTo;
+    protected $error; //enum of class TimestampIntervalFromParametersErrorEnum
+    
+    
+    function __construct(){
+      $this->timestampFrom = null;
+      $this->timestampTo = null;
+      $this->error = TimestampIntervalFromParametersErrorEnum::someOrBothBorderValuesOfIntervalNotDefined;
+    }
+    
+    
+    function initFromParameters($timestampFromParameterName, $timestampToParameterName){
+      $timestampFromAsText = $GLOBALS["_POST"][$timestampFromParameterName];
+      $timestampToAsText = $GLOBALS["_POST"][$timestampToParameterName];
+      $this->initFromTextValues($timestampFromAsText, $timestampToAsText);
+    } 
+    
+    
+    function initFromTextValues($timestampFromAsText, $timestampToAsText){
+      if(!isset($timestampFromAsText) || !isset($timestampToAsText) || $timestampFromAsText == "" || $timestampToAsText == "")
+        $this->error = TimestampIntervalFromParametersErrorEnum::someOrBothBorderValuesOfIntervalNotDefined;
+      else
+        $this->initFromTimestamps((new DateTime($timestampFromAsText))->getTimestamp(), (new DateTime($timestampToAsText))->getTimeStamp());
+    }
+    
+      
+    function initFromTimestamps($timestampFrom, $timestampTo){
+      $this->timestampFrom = $timestampFrom;
+      $this->timestampTo = $timestampTo;
+    
+      $this->error = ($this->timestampFrom > $this->timestampTo) ? TimestampIntervalFromParametersErrorEnum::timestampFromIsGreaterThanTimestampTo : TimestampIntervalFromParametersErrorEnum::noError;
+    }
+
+    
+    function getErrorMessage(){
+      switch($this->error){
+        case TimestampIntervalFromParametersErrorEnum::someOrBothBorderValuesOfIntervalNotDefined: return "'From' or 'To' timestamp were not specified.";
+        case TimestampIntervalFromParametersErrorEnum::timestampFromIsGreaterThanTimestampTo: return "'From' timestamp is greater than 'To' timestamp.";
+        default: return "";
+      }
+    }
+
+    
+    function getTimestampFrom(){
+      return ($this->error) ? null : $this->timestampFrom;
+    }
+
+    
+    function getTimestampTo(){
+      return ($this->error) ? null : $this->timestampTo;
+    }
+    
+    
+    function getError(){
+      return $this->error; 
+    }
+    
+    
+    function isError(){
+      return ($this->error == TimestampIntervalFromParametersErrorEnum::noError) ? false : true; 
+    }
+  }
+
+
+  abstract class TimestampIntervalFromParametersErrorEnum{
+    const noError = 0;
+    const someOrBothBorderValuesOfIntervalNotDefined = -1;
+    const timestampFromIsGreaterThanTimestampTo = -2;
+  }  
+
   
   class TrackPoints{
     public $trackPoints; //array of TrackPoint
@@ -281,13 +353,13 @@ echo $ls->predict([6, 450]);
     function getXpathEngine(){
       return $this->tcxFile->xpathEngine; 
     }
+                                                                          
     
-    
-    function preserveJustTrackPointsWithinTimestampsInterval($timestampFrom, $timestampTo){
+    function preserveJustTrackPointsWithinTimestampsInterval($timestampInterval){
       foreach($this->trackPoints as $trackPoint){
         $timestamp = $trackPoint->getTimestamp();
         
-        if($timestamp < $timestampFrom || $timestamp > $timestampTo)
+        if($timestamp < $timestampInterval->getTimestampFrom() || $timestamp > $timestampInterval->getTimestampTo())
           $this->remove($trackPoint);
       }
     }
@@ -452,7 +524,6 @@ echo $ls->predict([6, 450]);
       if($shift)
         $this->shiftElementValue("n:Position/n:LongitudeDegrees", $shift); 
     }
-    
   }
   
   
@@ -472,5 +543,8 @@ echo $ls->predict([6, 450]);
   function inputCheckboxChecked($name){
     return (isset($GLOBALS["_POST"][$name]));
   }
+
+  
+  
   
 ?>
