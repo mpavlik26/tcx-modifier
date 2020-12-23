@@ -1,18 +1,8 @@
 <?php
 
-require_once "c:\\users\\Martin Pavlík\\vendor\\autoload.php";
+  require_once "c:\\users\\Martin Pavlík\\vendor\\autoload.php";
 
-/*
-use Phpml\Regression\LeastSquares;
-
-$watts = [[1, 500], [2, 450], [7, 400], [8, 420], [10, 500]];
-$hrs = [160, 150, 140, 144, 165];
-
-$ls = new LeastSquares();
-$ls->train($watts, $hrs);
-
-echo $ls->predict([6, 450]);
-*/
+  use Phpml\Regression\LeastSquares;
 
   require_once ('jpgraph/src/jpgraph.php');
   require_once ('jpgraph/src/jpgraph_line.php');
@@ -79,7 +69,7 @@ echo $ls->predict([6, 450]);
     $tcx->preserveJustXth($xth);
   
   if(!($timestampIntervalForModification->isError()))
-    $tcx->modifyTrackPoints($timestampIntervalForModification, $checkbox_setHR, $hr, $shiftLatitude, $shiftLongitude);
+    $tcx->modifyTrackPoints($timestampIntervalForModification, $checkbox_setHR, $hr, $timestampIntervalForTraining, $shiftLatitude, $shiftLongitude);
 
   $tcx->displayGraph();
   
@@ -129,13 +119,17 @@ echo $ls->predict([6, 450]);
     }
 
     
-    function modifyTrackPoints($timestampInterval, $checkbox_setHR, $hr, $latitudeShift, $longitudeShift){
+    function modifyTrackPoints($timestampIntervalForModification, $checkbox_setHR, $hr, $timestampIntervalForTraining, $latitudeShift, $longitudeShift){
       $trackPoints = new TrackPoints($this);
       
-      $trackPoints->preserveJustTrackPointsWithinTimestampsInterval($timestampInterval);
+      $trackPoints->filterAccordingToTimestampInterval($timestampIntervalForModification, true);
 
-      if($checkbox_setHR)
-        $trackPoints->setProgressiveHR($hr);
+      if($checkbox_setHR){
+        if($trackPoints->areWattsAvailable() && !$timestampIntervalForTraining->isError())
+           $trackPoints->setHRAccordingToMovingAverageWatts($hr, $timestampIntervalForTraining);
+        else
+          $trackPoints->setProgressiveHR($hr);
+      }
       
       if($latitudeShift)
         $trackPoints->applyMethodOnTrackPoints("shiftLatitude", $latitudeShift);
@@ -355,11 +349,12 @@ echo $ls->predict([6, 450]);
     }
                                                                           
     
-    function preserveJustTrackPointsWithinTimestampsInterval($timestampInterval){
+    function filterAccordingToTimestampInterval($timestampInterval, $preserve){//$preserve: true -> only trackPoints in interval remains; false -> only trackPoints not in interval remains
       foreach($this->trackPoints as $trackPoint){
         $timestamp = $trackPoint->getTimestamp();
+        $isInInterval = ($timestamp >= $timestampInterval->getTimestampFrom() && $timestamp <= $timestampInterval->getTimestampTo());
         
-        if($timestamp < $timestampInterval->getTimestampFrom() || $timestamp > $timestampInterval->getTimestampTo())
+        if($preserve && !$isInInterval || !$preserve && $isInInterval)
           $this->remove($trackPoint);
       }
     }
@@ -370,35 +365,28 @@ echo $ls->predict([6, 450]);
     }
    
     
-    function setHRAccordingToMovingAverageWatts($hr){//if ($hr == 0) then HR of the last trackPoint is used instead
-      if($this->areWattsAvailable()){
-        $firstTrackPoint = reset($this->trackPoints);
-        $lastTrackPoint = end($this->trackPoints);
-        
+    function setHRAccordingToMovingAverageWatts($hr, $timestampIntervalForTraining){//if ($hr == 0) then HR of the last trackPoint is used instead
+      if($this->areWattsAvailable() && !$timestampIntervalForTraining->isError()){
         if($hr)
-          $lastTrackPoint->setHR($hr);
+          end($this->trackPoints)->setHR($hr);
+
+        $trainingTrackPoints = new TrackPoints($this->tcxFile);
+        $trainingTrackPoints->filterAccordingToTimestampInterval($timestampIntervalForTraining, true);
         
-        $firstHR = $firstTrackPoint->getHR();
-        $lastHR = $lastTrackPoint->getHR();
-        
-        $firstMAWatts = $firstTrackPoint->getMovingAverageWatts();
-        $lastMAWatts = $lastTrackPoint->getMovingAverageWatts();
-        $maxMAWatts = $this->getAggregationByTrackPointMethod("max", "getMovingAverageWatts");
-        $minMAWatts = $this->getAggregationByTrackPointMethod("min", "getMovingAverageWatts");
-        $spreadMAWatts = $maxMAWatts - $minMAWatts;
-        
-      }
-      
-      $trackPointsCount = $this->count();
-      
-      if($trackPointsCount){
-        
-        $step = ($lastHR - $firstHR) / ($trackPointsCount - 1);
-        
-        $hr = $firstHR;
-        foreach($this->trackPoints as $trackPoint){
-          $trackPoint->setHR(round($hr));
-          $hr += $step;
+        if($trainingTrackPoints->count() > 0){
+          $movingAverageWatts = addDimensionToArray($trainingTrackPoints->getArrayByTrackPointMethod("getMovingAverageWatts"));
+          $hrs = $trainingTrackPoints->getArrayByTrackPointMethod("getHR");
+          
+          $ls = new LeastSquares();
+          $ls->train($movingAverageWatts, $hrs);
+  
+          foreach($this->trackPoints as $trackPoint){
+            $trackPoint->setHR(round($ls->predict([$trackPoint->getMovingAverageWatts()]))); 
+          }
+        }
+        else{
+          echo "Training interval doesn't match to input tcx file and that's why progressive setting of HR is used instead of estimation based on watts.<br/>\n";
+          $this->setProgressiveHR($hr);
         }
       }
     }
@@ -436,13 +424,7 @@ echo $ls->predict([6, 450]);
 
     
     function areWattsAvailable(){
-      try{
-        $this->getWatts();
-        return true;
-      }
-      catch(Exception $e){
-        return false;
-      }
+      return !is_null($this->getWatts());
     }
     
     
@@ -483,7 +465,9 @@ echo $ls->predict([6, 450]);
 
     
     function getWatts(){
-      return $this->getElement("n:Extensions/e:TPX/e:Watts")->nodeValue;
+      $element = $this->getElement("n:Extensions/e:TPX/e:Watts");
+
+      return ($element) ? $element->nodeValue : null;
     }
     
     
@@ -545,6 +529,14 @@ echo $ls->predict([6, 450]);
   }
 
   
-  
+  function addDimensionToArray($inputArray){
+    $ret = array();
+    
+    foreach($inputArray as $key => $value){
+      $ret[$key] = [$value]; 
+    }
+    
+    return $ret;
+  }
   
 ?>
