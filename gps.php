@@ -23,8 +23,10 @@
   
   $checkbox_setHR = inputCheckboxChecked("setHR");
   $checkbox_shiftPositions = inputCheckboxChecked("shiftPositions");  
+  
   $timestampIntervalForModification = new TimestampInterval();
-
+  $timestampIntervalForTraining = new TimestampInterval();
+  
   if($checkbox_setHR || $checkbox_shiftPositions){
     $timestampIntervalForModification->initFromParameters("timestampFrom", "timestampTo");
     
@@ -32,7 +34,6 @@
       echo "There's a problem in specification of interval for modification: " . $timestampIntervalForModification->getErrorMessage() . "<br>\n";
                                                                                                   
     if($checkbox_setHR){
-      $timestampIntervalForTraining = new TimestampInterval();
       $timestampIntervalForTraining->initFromParameters("trainingTimestampFrom", "trainingTimestampTo");
       
       if($timestampIntervalForTraining->getError() == TimestampIntervalFromParametersErrorEnum::timestampFromIsGreaterThanTimestampTo)
@@ -284,7 +285,7 @@
     
     
     function displayGraph(){
-      $xs = $this->getArrayByTrackPointMethod("getTime");
+      $xs = $this->getArrayByTrackPointMethods("getTime");
       $graphWidth = 1800;
 
       $graph = new Graph($graphWidth, 500);
@@ -294,12 +295,12 @@
       $graph->xaxis->SetTextTickInterval(ceil(20 / ($graphWidth / count($xs))));
       $graph->xaxis->SetLabelAngle(90);
 
-      $hrs = $this->getArrayByTrackPointMethod("getHR");
+      $hrs = $this->getArrayByTrackPointMethods("getHR");
       $linePlotHR = new LinePlot($hrs);
       $graph->Add($linePlotHR);
       $linePlotHR->SetColor('red');
       
-      $altitudes = $this->getArrayByTrackPointMethod("getAltitude");
+      $altitudes = $this->getArrayByTrackPointMethods("getAltitude");
       $linePlotAltitude = new LinePlot($altitudes);
       $graph->SetYScale(0, "lin");
       $graph->AddY(0, $linePlotAltitude);
@@ -307,14 +308,14 @@
       $graph->ynaxis[0]->SetColor('black');
       
       if($this->areWattsAvailable()){
-        $watts = $this->getArrayByTrackPointMethod("getWatts");
+        $watts = $this->getArrayByTrackPointMethods("getWatts");
         $linePlotWatts = new LinePlot($watts);
         $graph->SetYScale(1, "lin");
         $graph->AddY(1, $linePlotWatts);
         $linePlotWatts->SetColor('green');
         $graph->ynaxis[1]->SetColor('green');
         
-        $movingAverageWatts = $this->getArrayByTrackPointMethod("getMovingAverageWatts");
+        $movingAverageWatts = $this->getArrayByTrackPointMethods("getMovingAverageWatts");
         $linePlotMovingAverageWatts = new LinePlot($movingAverageWatts);
         $graph->SetYScale(2, "lin");
         $graph->AddY(2, $linePlotMovingAverageWatts);
@@ -327,18 +328,18 @@
     }
     
     
-    function getArrayByTrackPointMethod($trackPointMethodName){
+    function getArrayByTrackPointMethods($trackPointMethodNames){//it returns array of values returned by TrackPoint::callMethods($trackPointMethodNames) calls - see definition of that method to understand the fact $trackPointMethodNames can be either a stringname of one method or an array of method names, or array of array ... and this everything influence the structure of the appropriate return value
       $ret = array();
       
       foreach($this->trackPoints as $trackPoint)
-        array_push($ret, $trackPoint->$trackPointMethodName());
+        array_push($ret, $trackPoint->callMethods($trackPointMethodNames));
       
       return $ret;
     }
     
     
     function getAggregationByTrackPointMethod($aggregationMethod, $trackPointMethodName){//example of usage: getAggregationByTrackPointMethod("min", "getHR"); ... finds the minimal HR
-      $values = $this->getArrayByTrackPointMethod($trackPointMethodName);
+      $values = $this->getArrayByTrackPointMethods($trackPointMethodName);
       
       return $aggregationMethod($values);
     }
@@ -374,14 +375,14 @@
         $trainingTrackPoints->filterAccordingToTimestampInterval($timestampIntervalForTraining, true);
         
         if($trainingTrackPoints->count() > 0){
-          $movingAverageWatts = addDimensionToArray($trainingTrackPoints->getArrayByTrackPointMethod("getMovingAverageWatts"));
-          $hrs = $trainingTrackPoints->getArrayByTrackPointMethod("getHR");
+          $movingAverageWatts = $trainingTrackPoints->getArrayByTrackPointMethods(["getTimestamp", "getMovingAverageWatts"]);
+          $hrs = $trainingTrackPoints->getArrayByTrackPointMethods("getHR");
           
           $ls = new LeastSquares();
           $ls->train($movingAverageWatts, $hrs);
   
           foreach($this->trackPoints as $trackPoint){
-            $trackPoint->setHR(round($ls->predict([$trackPoint->getMovingAverageWatts()]))); 
+            $trackPoint->setHR(round($ls->predict([$trackPoint->getTimestamp(), $trackPoint->getMovingAverageWatts()]))); 
           }
         }
         else{
@@ -425,6 +426,20 @@
     
     function areWattsAvailable(){
       return !is_null($this->getWatts());
+    }
+
+    
+    function callMethods($methodNames){//$methodNames can be either just one method name or an array of methods or even array of arrays. The return value depends on the object comming to this parameter. If it's scalar value, then just scalar value is returned. If it's an array, then array is returned and if it's array of arrays, then array of arrays is returned and so on ....
+      if(is_array($methodNames)){
+        $ret = array();
+        
+        foreach($methodNames as $methodName)
+          array_push($ret, $this->callMethods($methodName));
+      }
+      else
+        $ret = $this->$methodNames();
+        
+      return $ret;
     }
     
     
@@ -526,17 +541,6 @@
   
   function inputCheckboxChecked($name){
     return (isset($GLOBALS["_POST"][$name]));
-  }
-
-  
-  function addDimensionToArray($inputArray){
-    $ret = array();
-    
-    foreach($inputArray as $key => $value){
-      $ret[$key] = [$value]; 
-    }
-    
-    return $ret;
   }
   
 ?>
