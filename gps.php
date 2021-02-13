@@ -66,6 +66,8 @@
   $tcx = new TCXFile($uploadFileName);
   $tcx->displayGraph();
   
+  print_r($tcx->getHRAnomalies());
+  
   if($checkbox_preserveJustXth)
     $tcx->preserveJustXth($xth);
   
@@ -97,6 +99,11 @@
 
     function displayGraph(){
       (new TrackPoints($this))->displayGraph();
+    }
+    
+    
+    function getHRAnomalies(){
+      return (new TrackPoints($this))->getHRAnomalies();
     }
     
     
@@ -344,6 +351,38 @@
       return $aggregationMethod($values);
     }
 
+    
+    function getHRAnomalies(){
+      $minimalHRChangeInTimeRatioForAnomaly = 1; //minimal required ratio between HR change for the given time. Eg.: if it's = 2, then it's necessary HR changes for more than 10 in 5 seconds
+      $minimalHRChangeInForAnomaly = 5; // minimal change of HR for anomaly
+
+      $retAnomalies = array();
+      
+      $timeStampHRPairs = $this->getArrayByTrackPointMethods(["getTimeStamp", "getHR"]);
+      $timeStampHRPairsCount = count($timeStampHRPairs);
+    
+      $indexRightShift = 1;
+      for($i = 0; $i < $timeStampHRPairsCount; $i += $indexRightShift){
+        for($indexRightShift = 1; ($i + $indexRightShift) < $timeStampHRPairsCount; $indexRightShift++){
+          $differenceInSeconds = $timeStampHRPairs[$i + $indexRightShift][0] - $timeStampHRPairs[$i][0];
+          $differenceInHR = $timeStampHRPairs[$i + $indexRightShift][1] - $timeStampHRPairs[$i][1];
+          $ratio = $differenceInHR / $differenceInSeconds;
+          
+          if(abs($ratio) < $minimalHRChangeInTimeRatioForAnomaly){
+            if($differenceInHR >= $minimalHRChangeInForAnomaly){
+              if($indexRightShift > 1){
+                //array_push($retAnomalies, [$timeStampHRPairs[$i][0], $timeStampHRPairs[$i + $indexRightShift - 1][0]]);
+                array_push($retAnomalies, [(new DateTime())->setTimestamp($timeStampHRPairs[$i][0])->format("H:i:s"), (new DateTime())->setTimeStamp($timeStampHRPairs[$i + $indexRightShift - 1][0])->format("H:i:s")]);
+              }
+            }
+            break;
+          }
+        }
+      }
+      
+      return $retAnomalies;
+   }
+    
     
     function getXpathEngine(){
       return $this->tcxFile->xpathEngine; 
