@@ -6,6 +6,7 @@
 
   require_once ('jpgraph/src/jpgraph.php');
   require_once ('jpgraph/src/jpgraph_line.php');
+  require_once ('jpgraph/src/jpgraph_plotline.php');
 
   $fileFromForm = $_FILES["fileToUpload"];
   $uploadsDir = "../uploads";
@@ -63,7 +64,7 @@
     exit("Unable to save uploaded file to uploads dir");
 
     
-  $tcx = new TCXFile($uploadFileName);
+  $tcx = new TCXFile($uploadFileName, $timestampIntervalForModification);
   $tcx->displayGraph();
   
   print_r($tcx->getHRAnomalies());
@@ -71,8 +72,7 @@
   if($checkbox_preserveJustXth)
     $tcx->preserveJustXth($xth);
   
-  if(!($timestampIntervalForModification->isError()))
-    $tcx->modifyTrackPoints($timestampIntervalForModification, $checkbox_setHR, $hr, $timestampIntervalForTraining, $shiftLatitude, $shiftLongitude);
+  $tcx->modifyTrackPoints($checkbox_setHR, $hr, $timestampIntervalForTraining, $shiftLatitude, $shiftLongitude);
 
   $tcx->displayGraph();
   
@@ -82,11 +82,12 @@
   
   
   class TCXFile{
+    public $timestampIntervalForModification;
     public $xml;
     public $xpathEngine;
     
     
-    function __construct($fileName){
+    function __construct($fileName, $timestampIntervalForModification){
       $this->xml = new DomDocument();
       if(!$this->xml->load($fileName))
         exit("Unable to parse file '" . $fileName . "'");
@@ -94,6 +95,8 @@
       $this->xpathEngine = new DOMXpath($this->xml);
       $this->xpathEngine->registerNamespace("n", "http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2");
       $this->xpathEngine->registerNamespace("e", "http://www.garmin.com/xmlschemas/ActivityExtension/v2");
+      
+      $this->timestampIntervalForModification = $timestampIntervalForModification;
     }
 
 
@@ -127,10 +130,13 @@
     }
 
     
-    function modifyTrackPoints($timestampIntervalForModification, $checkbox_setHR, $hr, $timestampIntervalForTraining, $latitudeShift, $longitudeShift){
+    function modifyTrackPoints($checkbox_setHR, $hr, $timestampIntervalForTraining, $latitudeShift, $longitudeShift){
+      if($this->timestampIntervalForModification->isError()) //if there's no timestamp interval for modification defined, no modification occurs
+        return;
+      
       $trackPoints = new TrackPoints($this);
       
-      $trackPoints->filterAccordingToTimestampInterval($timestampIntervalForModification, true);
+      $trackPoints->filterAccordingToTimestampInterval($this->timestampIntervalForModification, true);
 
       if($checkbox_setHR){
         if($trackPoints->areWattsAvailable() && !$timestampIntervalForTraining->isError())
@@ -156,9 +162,9 @@
 
   
   class TimestampInterval{
-    protected $timestampFrom;
-    protected $timestampTo;
-    protected $error; //enum of class TimestampIntervalFromParametersErrorEnum
+    public $timestampFrom;
+    public $timestampTo;
+    public $error; //enum of class TimestampIntervalFromParametersErrorEnum
     
     
     function __construct(){
@@ -319,7 +325,7 @@
         $linePlotWatts = new LinePlot($watts);
         $graph->SetYScale(1, "lin");
         $graph->AddY(1, $linePlotWatts);
-        $linePlotWatts->SetColor('green');
+        $linePlotWatts->SetColor('green');                                                                                                                                              
         $graph->ynaxis[1]->SetColor('green');
         
         $movingAverageWatts = $this->getArrayByTrackPointMethods("getMovingAverageWatts");
@@ -328,8 +334,16 @@
         $graph->AddY(2, $linePlotMovingAverageWatts);
         $linePlotMovingAverageWatts->SetColor('magenta');
         $graph->ynaxis[2]->SetColor('magenta');
-        
       }
+      
+      $verticalLines = new VerticalLines($graph, $this->getArrayByTrackPointMethods("getTimestamp"));
+      
+      if(!($this->tcxFile->timestampIntervalForModification->isError())){
+        $verticalLines->addVerticalLine(new VerticalLine($verticalLines, $this->tcxFile->timestampIntervalForModification->timestampFrom, "green"));
+        $verticalLines->addVerticalLine(new VerticalLine($verticalLines, $this->tcxFile->timestampIntervalForModification->timestampTo, "red"));
+      }
+        
+      $verticalLines->addToGraph();
       
       displayGraph($graph);
     }
@@ -487,8 +501,8 @@
     }
 
     
-    function getDateTime(){
-      $timeNode = ($this->getXpathEngine()->query("n:Time", $this->domElement))[0]; 
+    function getDateTime(){ 
+      $timeNode = $this->getElement("n:Time");
       return new DateTime($timeNode->textContent);
     }
     
@@ -561,6 +575,50 @@
     function shiftLongitude($shift){
       if($shift)
         $this->shiftElementValue("n:Position/n:LongitudeDegrees", $shift); 
+    }
+  }
+  
+  
+  class VerticalLines{
+    public $graph;
+    public $verticalLines;
+    public $firstGraphTimestamp;
+    
+    function __construct($graph, $timestamps){
+      $this->graph = $graph;
+      $this->verticalLines = array();
+      $this->firstGraphTimestamp = min($timestamps);
+    }
+    
+    
+    function addVerticalLine($verticalLine){
+      $this->verticalLines[$verticalLine->timestamp] = $verticalLine; 
+    }
+    
+    
+    function addToGraph(){
+      foreach($this->verticalLines as $verticalLine){
+        $verticalLine->addToGraph(); 
+      }
+    }
+  }
+  
+  
+  class VerticalLine{
+    public $color;
+    public $timestamp;
+    public $verticalLines;//parent
+    
+    
+    function __construct($verticalLines, $timestamp, $color){
+      $this->verticalLines = $verticalLines;
+      $this->timestamp = $timestamp;
+      $this->color = $color;
+    }
+
+    
+    function addToGraph(){
+      $this->verticalLines->graph->AddLine(new PlotLine(VERTICAL, ($this->timestamp - $this->verticalLines->firstGraphTimestamp), $this->color, 1)); 
     }
   }
   
