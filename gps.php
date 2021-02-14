@@ -94,6 +94,13 @@
     }
 
     
+    function applyMethodOnItems($itemMethodName, $param){
+      foreach($this->items as $item){
+        $item->$itemMethodName($param);
+      }
+    }
+    
+    
     function count(){
       return count($this->items);   
     }
@@ -193,10 +200,10 @@
       }
       
       if($latitudeShift)
-        $trackPoints->applyMethodOnTrackPoints("shiftLatitude", $latitudeShift);
+        $trackPoints->applyMethodOnItems("shiftLatitude", $latitudeShift);
       
       if($longitudeShift)
-        $trackPoints->applyMethodOnTrackPoints("shiftLongitude", $longitudeShift);
+        $trackPoints->applyMethodOnItems("shiftLongitude", $longitudeShift);
       
       echo $trackPoints->count() . " track point(s) were/was modified<br/>\n";
     }
@@ -323,13 +330,6 @@
       $verticalLines->set2ItemsForTimestampInterval($this->tcxFile->timestampIntervalForModification, "green", "red");
         
       $verticalLines->addToGraph();
-    }
-    
-    
-    function applyMethodOnTrackPoints($trackPointMethodName, $param){
-      foreach($this->items as $trackPoint){
-        $trackPoint->$trackPointMethodName($param);
-      }
     }
     
     
