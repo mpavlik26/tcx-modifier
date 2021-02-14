@@ -113,11 +113,11 @@
     }
 
     
-    function getArrayByItemMethods($itemMethodNames){//it returns array of values returned by item::callMethods($trackPointMethodNames) calls - see definition of that method to understand the fact $itemMethodNames can be either a stringname of one method or an array of method names, or array of array ... and this everything influence the structure of the appropriate return value
+    function getArrayByItemMethods($itemMethodNames){//it returns array of values returned by _ReflectionItem::callMethods($trackPointMethodNames) calls - see definition of that method to understand the fact $itemMethodNames can be either a stringname of one method or an array of method names, or array of array ... and this everything influence the structure of the appropriate return value
       $ret = array();
       
       foreach($this->items as $item)
-        array_push($ret, $item->callMethods($itemMethodNames));
+        array_push($ret, $item->callMethods($itemMethodNames)); //callMethods is method of _ReflectionItem abstract class. An item has to be an object of class derived from _ReflectionItem abstract class
       
       return $ret;
     }
