@@ -104,6 +104,16 @@
     function count(){
       return count($this->items);   
     }
+
+    
+    function getArrayByItemMethods($itemMethodNames){//it returns array of values returned by item::callMethods($trackPointMethodNames) calls - see definition of that method to understand the fact $itemMethodNames can be either a stringname of one method or an array of method names, or array of array ... and this everything influence the structure of the appropriate return value
+      $ret = array();
+      
+      foreach($this->items as $item)
+        array_push($ret, $item->callMethods($itemMethodNames));
+      
+      return $ret;
+    }
     
     
     function setItem($key, $item){
@@ -325,7 +335,7 @@
     
     
     function addVerticalLinesToGraph($graph){
-      $verticalLines = new VerticalLines($graph, $this->getArrayByTrackPointMethods("getTimestamp"));
+      $verticalLines = new VerticalLines($graph, $this->getArrayByItemMethods("getTimestamp"));
       
       $verticalLines->set2ItemsForTimestampInterval($this->tcxFile->timestampIntervalForModification, "green", "red");
         
@@ -362,7 +372,7 @@
     
     
     function displayGraph(){
-      $xs = $this->getArrayByTrackPointMethods("getTime");
+      $xs = $this->getArrayByItemMethods("getTime");
       $graphWidth = 1800;
 
       $graph = new Graph($graphWidth, 500);
@@ -372,12 +382,12 @@
       $graph->xaxis->SetTextTickInterval(ceil(20 / ($graphWidth / count($xs))));
       $graph->xaxis->SetLabelAngle(90);
 
-      $hrs = $this->getArrayByTrackPointMethods("getHR");
+      $hrs = $this->getArrayByItemMethods("getHR");
       $linePlotHR = new LinePlot($hrs);
       $graph->Add($linePlotHR);
       $linePlotHR->SetColor('red');
       
-      $altitudes = $this->getArrayByTrackPointMethods("getAltitude");
+      $altitudes = $this->getArrayByItemMethods("getAltitude");
       $linePlotAltitude = new LinePlot($altitudes);
       $graph->SetYScale(0, "lin");
       $graph->AddY(0, $linePlotAltitude);
@@ -385,14 +395,14 @@
       $graph->ynaxis[0]->SetColor('black');
       
       if($this->areWattsAvailable()){
-        $watts = $this->getArrayByTrackPointMethods("getWatts");
+        $watts = $this->getArrayByItemMethods("getWatts");
         $linePlotWatts = new LinePlot($watts);
         $graph->SetYScale(1, "lin");
         $graph->AddY(1, $linePlotWatts);
         $linePlotWatts->SetColor('green');                                                                                                                                              
         $graph->ynaxis[1]->SetColor('green');
         
-        $movingAverageWatts = $this->getArrayByTrackPointMethods("getMovingAverageWatts");
+        $movingAverageWatts = $this->getArrayByItemMethods("getMovingAverageWatts");
         $linePlotMovingAverageWatts = new LinePlot($movingAverageWatts);
         $graph->SetYScale(2, "lin");
         $graph->AddY(2, $linePlotMovingAverageWatts);
@@ -406,18 +416,8 @@
     }
     
     
-    function getArrayByTrackPointMethods($trackPointMethodNames){//it returns array of values returned by TrackPoint::callMethods($trackPointMethodNames) calls - see definition of that method to understand the fact $trackPointMethodNames can be either a stringname of one method or an array of method names, or array of array ... and this everything influence the structure of the appropriate return value
-      $ret = array();
-      
-      foreach($this->items as $trackPoint)
-        array_push($ret, $trackPoint->callMethods($trackPointMethodNames));
-      
-      return $ret;
-    }
-    
-    
     function getAggregationByTrackPointMethod($aggregationMethod, $trackPointMethodName){//example of usage: getAggregationByTrackPointMethod("min", "getHR"); ... finds the minimal HR
-      $values = $this->getArrayByTrackPointMethods($trackPointMethodName);
+      $values = $this->getArrayByItemMethods($trackPointMethodName);
       
       return $aggregationMethod($values);
     }
@@ -429,7 +429,7 @@
 
       $hrAnomalies = new HRAnomalies();
       
-      $timeStampHRPairs = $this->getArrayByTrackPointMethods(["getTimeStamp", "getHR"]);
+      $timeStampHRPairs = $this->getArrayByItemMethods(["getTimeStamp", "getHR"]);
       $timeStampHRPairsCount = count($timeStampHRPairs);
     
       $indexRightShift = 1;
@@ -486,8 +486,8 @@
         $trainingTrackPoints->filterAccordingToTimestampInterval($timestampIntervalForTraining, true);
         
         if($trainingTrackPoints->count() > 0){
-          $movingAverageWatts = $trainingTrackPoints->getArrayByTrackPointMethods(["getTimestamp", "getMovingAverageWatts"]);
-          $hrs = $trainingTrackPoints->getArrayByTrackPointMethods("getHR");
+          $movingAverageWatts = $trainingTrackPoints->getArrayByItemMethods(["getTimestamp", "getMovingAverageWatts"]);
+          $hrs = $trainingTrackPoints->getArrayByItemMethods("getHR");
           
           $ls = new LeastSquares();
           $ls->train($movingAverageWatts, $hrs);
