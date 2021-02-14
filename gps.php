@@ -102,6 +102,11 @@
     function setItem($key, $item){
       $this->items[$key] = $item; 
     }
+    
+    
+    function setItemUsingMethod($item, $method){
+      $this->items[$item->$method()] = $item; 
+    }
   }
   
   
@@ -306,16 +311,11 @@
       $trackPointNodes = $this->getXpathEngine()->query("//n:Trackpoint");
       
       foreach($trackPointNodes as $trackPointNode)
-        $this->add(new TrackPoint($trackPointNode, $this));
+        $this->setItemUsingMethod(new TrackPoint($trackPointNode, $this), "getTimestamp");
       
       $this->countMovingAverageWatts();
     }
     
-    
-    function add($trackPoint){
-      $this->items[$trackPoint->getTimestamp()] = $trackPoint; 
-    }
-
     
     function addVerticalLinesToGraph($graph){
       $verticalLines = new VerticalLines($graph, $this->getArrayByTrackPointMethods("getTimestamp"));
