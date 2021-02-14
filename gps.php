@@ -80,7 +80,7 @@
   
   echo "Done";
   
-  class _Array{
+  abstract class _Array{
     public $items;
     
     
@@ -103,6 +103,13 @@
     
     function count(){
       return count($this->items);   
+    }
+
+    
+    function getAggregationByItemMethod($aggregationMethod, $itemMethodName){//example of usage: getAggregationByItemMethod("min", "getHR"); ... finds the minimal HR
+      $values = $this->getArrayByItemMethods($itemMethodName);
+      
+      return $aggregationMethod($values);
     }
 
     
@@ -141,6 +148,25 @@
     
     function __construct($timestampInterval){
       $this->timestampInterval = $timestampInterval;
+    }
+  }
+  
+  
+  abstract class _ReflectionItem{
+    function __construct(){}
+    
+    
+    function callMethods($methodNames){//$methodNames can be either just one method name or an array of methods or even array of arrays. The return value depends on the object comming to this parameter. If it's scalar value, then just scalar value is returned. If it's an array, then array is returned and if it's array of arrays, then array of arrays is returned and so on ....
+      if(is_array($methodNames)){
+        $ret = array();
+        
+        foreach($methodNames as $methodName)
+          array_push($ret, $this->callMethods($methodName));
+      }
+      else
+        $ret = $this->$methodNames();
+        
+      return $ret;
     }
   }
   
@@ -416,13 +442,6 @@
     }
     
     
-    function getAggregationByTrackPointMethod($aggregationMethod, $trackPointMethodName){//example of usage: getAggregationByTrackPointMethod("min", "getHR"); ... finds the minimal HR
-      $values = $this->getArrayByItemMethods($trackPointMethodName);
-      
-      return $aggregationMethod($values);
-    }
-
-    
     function getHRAnomalies(){
       $minimalHRChangeInTimeRatioForAnomaly = 1; //minimal required ratio between HR change for the given time. Eg.: if it's = 2, then it's necessary HR changes for more than 10 in 5 seconds
       $minimalHRChangeInForAnomaly = 5; // minimal change of HR for anomaly
@@ -524,12 +543,14 @@
   }
   
   
-  class TrackPoint{
+  class TrackPoint extends _ReflectionItem{
     public $domElement;
     public $trackPoints;
     public $movingAverageWatts;
     
     function __construct($domElement, $trackPoints){
+      parent::__construct();
+      
       $this->domElement = $domElement;
       $this->trackPoints = $trackPoints;
     }
@@ -539,20 +560,6 @@
       return !is_null($this->getWatts());
     }
 
-    
-    function callMethods($methodNames){//$methodNames can be either just one method name or an array of methods or even array of arrays. The return value depends on the object comming to this parameter. If it's scalar value, then just scalar value is returned. If it's an array, then array is returned and if it's array of arrays, then array of arrays is returned and so on ....
-      if(is_array($methodNames)){
-        $ret = array();
-        
-        foreach($methodNames as $methodName)
-          array_push($ret, $this->callMethods($methodName));
-      }
-      else
-        $ret = $this->$methodNames();
-        
-      return $ret;
-    }
-    
     
     function getAltitude(){
       return $this->getElement("n:AltitudeMeters")->nodeValue;
@@ -637,6 +644,27 @@
   }
   
   
+  class VerticalLine extends _ReflectionItem{
+    public $color;
+    public $timestamp;
+    public $verticalLines;//parent
+    
+    
+    function __construct($verticalLines, $timestamp, $color){
+      parent::__construct();
+      
+      $this->verticalLines = $verticalLines;
+      $this->timestamp = $timestamp;
+      $this->color = $color;
+    }
+
+    
+    function addToGraph(){
+      $this->verticalLines->graph->AddLine(new PlotLine(VERTICAL, ($this->timestamp - $this->verticalLines->firstGraphTimestamp), $this->color, 1)); 
+    }
+  }
+  
+  
   class VerticalLines extends _Array{
     public $graph;
     public $firstGraphTimestamp;
@@ -665,25 +693,6 @@
       foreach($this->items as $verticalLine){
         $verticalLine->addToGraph(); 
       }
-    }
-  }
-  
-  
-  class VerticalLine{
-    public $color;
-    public $timestamp;
-    public $verticalLines;//parent
-    
-    
-    function __construct($verticalLines, $timestamp, $color){
-      $this->verticalLines = $verticalLines;
-      $this->timestamp = $timestamp;
-      $this->color = $color;
-    }
-
-    
-    function addToGraph(){
-      $this->verticalLines->graph->AddLine(new PlotLine(VERTICAL, ($this->timestamp - $this->verticalLines->firstGraphTimestamp), $this->color, 1)); 
     }
   }
   
