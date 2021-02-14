@@ -80,6 +80,48 @@
   
   echo "Done";
   
+  class _Array{
+    public $items;
+    
+    
+    function __construct(){
+      $this->items = array(); 
+    }
+    
+    
+    function addItem($item){
+      array_push($this->items, $item); 
+    }
+
+    
+    function count(){
+      return count($this->items);   
+    }
+    
+    
+    function setItem($key, $item){
+      $this->items[$key] = $item; 
+    }
+  }
+  
+  
+  
+  class HRAnomalies extends _Array{
+    function __construct(){
+      parent::__construct(); 
+    }
+  }
+  
+  
+  class HRAnomaly{
+    public $timestampInterval; //object of TimestampInterval class
+    
+    
+    function __construct($timestampInterval){
+      $this->timestampInterval = $timestampInterval;
+    }
+  }
+  
   
   class TCXFile{
     public $timestampIntervalForModification;
@@ -162,15 +204,20 @@
 
   
   class TimestampInterval{
-    public $timestampFrom;
-    public $timestampTo;
-    public $error; //enum of class TimestampIntervalFromParametersErrorEnum
+    protected $timestampFrom;
+    protected $timestampTo;
+    protected $error; //enum of class TimestampIntervalFromParametersErrorEnum
     
     
     function __construct(){
       $this->timestampFrom = null;
       $this->timestampTo = null;
       $this->error = TimestampIntervalFromParametersErrorEnum::someOrBothBorderValuesOfIntervalNotDefined;
+    }
+    
+    
+    function __debugInfo(){
+      return ["timestampInterval" => $this->toString()]; 
     }
     
     
@@ -224,6 +271,19 @@
     function isError(){
       return ($this->error == TimestampIntervalFromParametersErrorEnum::noError) ? false : true; 
     }
+    
+    
+    function toString($includeDate = true){
+      if($this->isError())
+        return $this->getErrorMessage();
+      else{
+        $format = (($includeDate) ? "d.m.Y " : "") .  "H:i:s";
+        $from = (new DateTime())->setTimestamp($this->getTimeStampFrom())->format($format);
+        $to = (new DateTime())->setTimestamp($this->getTimeStampTo())->format($format);
+        
+        return $from . " - " . $to;
+      }
+    }
   }
 
 
@@ -234,15 +294,15 @@
   }  
 
   
-  class TrackPoints{
-    public $trackPoints; //array of TrackPoint
+  class TrackPoints extends _Array{
     public $tcxFile;
     
     
     function __construct($tcxFile){
+      parent::__construct();
+      
       $this->tcxFile = $tcxFile;
       
-      $this->trackPoints = array(); 
       $trackPointNodes = $this->getXpathEngine()->query("//n:Trackpoint");
       
       foreach($trackPointNodes as $trackPointNode)
@@ -253,19 +313,28 @@
     
     
     function add($trackPoint){
-      $this->trackPoints[$trackPoint->getTimestamp()] = $trackPoint; 
+      $this->items[$trackPoint->getTimestamp()] = $trackPoint; 
     }
 
     
+    function addVerticalLinesToGraph($graph){
+      $verticalLines = new VerticalLines($graph, $this->getArrayByTrackPointMethods("getTimestamp"));
+      
+      $verticalLines->set2ItemsForTimestampInterval($this->tcxFile->timestampIntervalForModification, "green", "red");
+        
+      $verticalLines->addToGraph();
+    }
+    
+    
     function applyMethodOnTrackPoints($trackPointMethodName, $param){
-      foreach($this->trackPoints as $trackPoint){
+      foreach($this->items as $trackPoint){
         $trackPoint->$trackPointMethodName($param);
       }
     }
     
     
     function areWattsAvailable(){
-      return ($this->count()) ? reset($this->trackPoints)->areWattsAvailable() : false;
+      return ($this->count()) ? reset($this->items)->areWattsAvailable() : false;
     }
     
 
@@ -273,10 +342,10 @@
       if($this->areWattsAvailable()){
         $sum = 0;
         $count = 0;
-        $leftBorderOfMovingWindowArray = $this->trackPoints;
+        $leftBorderOfMovingWindowArray = $this->items;
         $leftBorderOfMovingWindow = reset($leftBorderOfMovingWindowArray);
         
-        foreach($this->trackPoints as $trackPoint){
+        foreach($this->items as $trackPoint){
           $sum += $trackPoint->getWatts();
           $count++;
           
@@ -289,11 +358,6 @@
           $trackPoint->setMovingAverageWatts(round($sum / $count));
         }
       }
-    }
-    
-    
-    function count(){
-      return count($this->trackPoints);   
     }
     
     
@@ -336,14 +400,7 @@
         $graph->ynaxis[2]->SetColor('magenta');
       }
       
-      $verticalLines = new VerticalLines($graph, $this->getArrayByTrackPointMethods("getTimestamp"));
-      
-      if(!($this->tcxFile->timestampIntervalForModification->isError())){
-        $verticalLines->addVerticalLine(new VerticalLine($verticalLines, $this->tcxFile->timestampIntervalForModification->timestampFrom, "green"));
-        $verticalLines->addVerticalLine(new VerticalLine($verticalLines, $this->tcxFile->timestampIntervalForModification->timestampTo, "red"));
-      }
-        
-      $verticalLines->addToGraph();
+      $this->addVerticalLinesToGraph($graph);
       
       displayGraph($graph);
     }
@@ -352,7 +409,7 @@
     function getArrayByTrackPointMethods($trackPointMethodNames){//it returns array of values returned by TrackPoint::callMethods($trackPointMethodNames) calls - see definition of that method to understand the fact $trackPointMethodNames can be either a stringname of one method or an array of method names, or array of array ... and this everything influence the structure of the appropriate return value
       $ret = array();
       
-      foreach($this->trackPoints as $trackPoint)
+      foreach($this->items as $trackPoint)
         array_push($ret, $trackPoint->callMethods($trackPointMethodNames));
       
       return $ret;
@@ -370,7 +427,7 @@
       $minimalHRChangeInTimeRatioForAnomaly = 1; //minimal required ratio between HR change for the given time. Eg.: if it's = 2, then it's necessary HR changes for more than 10 in 5 seconds
       $minimalHRChangeInForAnomaly = 5; // minimal change of HR for anomaly
 
-      $retAnomalies = array();
+      $hrAnomalies = new HRAnomalies();
       
       $timeStampHRPairs = $this->getArrayByTrackPointMethods(["getTimeStamp", "getHR"]);
       $timeStampHRPairsCount = count($timeStampHRPairs);
@@ -385,8 +442,9 @@
           if(abs($ratio) < $minimalHRChangeInTimeRatioForAnomaly){
             if($differenceInHR >= $minimalHRChangeInForAnomaly){
               if($indexRightShift > 1){
-                //array_push($retAnomalies, [$timeStampHRPairs[$i][0], $timeStampHRPairs[$i + $indexRightShift - 1][0]]);
-                array_push($retAnomalies, [(new DateTime())->setTimestamp($timeStampHRPairs[$i][0])->format("H:i:s"), (new DateTime())->setTimeStamp($timeStampHRPairs[$i + $indexRightShift - 1][0])->format("H:i:s")]);
+                $timestampInterval = new TimestampInterval();
+                $timestampInterval->initFromTimestamps($timeStampHRPairs[$i][0], $timeStampHRPairs[$i + $indexRightShift - 1][0]);
+                $hrAnomalies->addItem(new HRAnomaly($timestampInterval));
               }
             }
             break;
@@ -394,7 +452,7 @@
         }
       }
       
-      return $retAnomalies;
+      return $hrAnomalies;
    }
     
     
@@ -404,7 +462,7 @@
                                                                           
     
     function filterAccordingToTimestampInterval($timestampInterval, $preserve){//$preserve: true -> only trackPoints in interval remains; false -> only trackPoints not in interval remains
-      foreach($this->trackPoints as $trackPoint){
+      foreach($this->items as $trackPoint){
         $timestamp = $trackPoint->getTimestamp();
         $isInInterval = ($timestamp >= $timestampInterval->getTimestampFrom() && $timestamp <= $timestampInterval->getTimestampTo());
         
@@ -415,14 +473,14 @@
     
 
     function remove($trackPoint){
-      unset($this->trackPoints[$trackPoint->getTimestamp()]); 
+      unset($this->items[$trackPoint->getTimestamp()]); 
     }
    
     
     function setHRAccordingToMovingAverageWatts($hr, $timestampIntervalForTraining){//if ($hr == 0) then HR of the last trackPoint is used instead
       if($this->areWattsAvailable() && !$timestampIntervalForTraining->isError()){
         if($hr)
-          end($this->trackPoints)->setHR($hr);
+          end($this->items)->setHR($hr);
 
         $trainingTrackPoints = new TrackPoints($this->tcxFile);
         $trainingTrackPoints->filterAccordingToTimestampInterval($timestampIntervalForTraining, true);
@@ -434,7 +492,7 @@
           $ls = new LeastSquares();
           $ls->train($movingAverageWatts, $hrs);
   
-          foreach($this->trackPoints as $trackPoint){
+          foreach($this->items as $trackPoint){
             $trackPoint->setHR(round($ls->predict([$trackPoint->getTimestamp(), $trackPoint->getMovingAverageWatts()]))); 
           }
         }
@@ -450,13 +508,13 @@
       $trackPointsCount = $this->count();
       
       if($trackPointsCount){
-        $firstHR = reset($this->trackPoints)->getHR();
-        $lastHR = ($hr) ? $hr : end($this->trackPoints)->getHR();
+        $firstHR = reset($this->items)->getHR();
+        $lastHR = ($hr) ? $hr : end($this->items)->getHR();
         
         $step = ($lastHR - $firstHR) / ($trackPointsCount - 1);
         
         $hr = $firstHR;
-        foreach($this->trackPoints as $trackPoint){
+        foreach($this->items as $trackPoint){
           $trackPoint->setHR(round($hr));
           $hr += $step;
         }
@@ -579,25 +637,32 @@
   }
   
   
-  class VerticalLines{
+  class VerticalLines extends _Array{
     public $graph;
-    public $verticalLines;
     public $firstGraphTimestamp;
     
     function __construct($graph, $timestamps){
+      parent::__construct();
+      
       $this->graph = $graph;
-      $this->verticalLines = array();
       $this->firstGraphTimestamp = min($timestamps);
     }
     
     
-    function addVerticalLine($verticalLine){
-      $this->verticalLines[$verticalLine->timestamp] = $verticalLine; 
+    function set2ItemsForTimestampInterval($timestampInterval, $colorFrom, $colorTo){
+      if($timestampInterval->isError())
+        return;
+      
+      $timestampFrom = $timestampInterval->getTimestampFrom();
+      $timestampTo = $timestampInterval->getTimestampTo();
+      
+      $this->setItem($timestampFrom, new VerticalLine($this, $timestampFrom, $colorFrom));
+      $this->setItem($timestampTo, new VerticalLine($this, $timestampTo, $colorTo));
     }
-    
+      
     
     function addToGraph(){
-      foreach($this->verticalLines as $verticalLine){
+      foreach($this->items as $verticalLine){
         $verticalLine->addToGraph(); 
       }
     }
