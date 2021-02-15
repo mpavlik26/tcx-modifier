@@ -65,9 +65,11 @@
 
     
   $tcx = new TCXFile($uploadFileName, $timestampIntervalForModification);
-  $tcx->displayGraph();
+
+  $tcx->setHRAnomalies();
+  print_r($tcx->hrAnomalies);
   
-  print_r($tcx->getHRAnomalies());
+  $tcx->displayGraph();
   
   if($checkbox_preserveJustXth)
     $tcx->preserveJustXth($xth);
@@ -172,6 +174,7 @@
   
   
   class TCXFile{
+    public $hrAnomalies;
     public $timestampIntervalForModification;
     public $xml;
     public $xpathEngine;
@@ -195,8 +198,8 @@
     }
     
     
-    function getHRAnomalies(){
-      return (new TrackPoints($this))->getHRAnomalies();
+    function setHRAnomalies(){
+      $this->hrAnomalies = (new TrackPoints($this))->getHRAnomalies();
     }
     
     
@@ -345,7 +348,7 @@
   class TrackPoints extends _Array{
     public $tcxFile;
     
-    
+
     function __construct($tcxFile){
       parent::__construct();
       
@@ -358,12 +361,16 @@
       
       $this->countMovingAverageWatts();
     }
-    
+
     
     function addVerticalLinesToGraph($graph){
       $verticalLines = new VerticalLines($graph, $this->getArrayByItemMethods("getTimestamp"));
       
       $verticalLines->set2ItemsForTimestampInterval($this->tcxFile->timestampIntervalForModification, "green", "red");
+      
+      foreach($this->tcxFile->hrAnomalies->items as $hrAnomaly){
+        $verticalLines->set2ItemsForTimestampInterval($hrAnomaly->timestampInterval, "blue", "brown");
+      }
         
       $verticalLines->addToGraph();
     }
@@ -443,7 +450,7 @@
     
     
     function getHRAnomalies(){
-      $minimalHRChangeInTimeRatioForAnomaly = 1; //minimal required ratio between HR change for the given time. Eg.: if it's = 2, then it's necessary HR changes for more than 10 in 5 seconds
+      $minimalHRChangeInTimeRatioForAnomaly = 0.5; //minimal required ratio between HR change for the given time. Eg.: if it's = 2, then it's necessary HR changes for more than 10 in 5 seconds
       $minimalHRChangeInForAnomaly = 5; // minimal change of HR for anomaly
 
       $hrAnomalies = new HRAnomalies();
