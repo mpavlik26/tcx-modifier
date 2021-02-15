@@ -65,9 +65,11 @@
 
     
   $tcx = new TCXFile($uploadFileName, $timestampIntervalForModification);
-  $tcx->displayGraph();
+
+  $tcx->setHRAnomalies();
+  print_r($tcx->hrAnomalies);
   
-  print_r($tcx->getHRAnomalies());
+  $tcx->displayGraph();
   
   if($checkbox_preserveJustXth)
     $tcx->preserveJustXth($xth);
@@ -80,8 +82,99 @@
   
   echo "Done";
   
+  abstract class _Array{
+    public $items;
+    
+    
+    function __construct(){
+      $this->items = array(); 
+    }
+    
+    
+    function addItem($item){
+      array_push($this->items, $item); 
+    }
+
+    
+    function applyMethodOnItems($itemMethodName, $param){
+      foreach($this->items as $item){
+        $item->$itemMethodName($param);
+      }
+    }
+    
+    
+    function count(){
+      return count($this->items);   
+    }
+
+    
+    function getAggregationByItemMethod($aggregationMethod, $itemMethodName){//example of usage: getAggregationByItemMethod("min", "getHR"); ... finds the minimal HR
+      $values = $this->getArrayByItemMethods($itemMethodName);
+      
+      return $aggregationMethod($values);
+    }
+
+    
+    function getArrayByItemMethods($itemMethodNames){//it returns array of values returned by _ReflectionItem::callMethods($trackPointMethodNames) calls - see definition of that method to understand the fact $itemMethodNames can be either a stringname of one method or an array of method names, or array of array ... and this everything influence the structure of the appropriate return value
+      $ret = array();
+      
+      foreach($this->items as $item)
+        array_push($ret, $item->callMethods($itemMethodNames)); //callMethods is method of _ReflectionItem abstract class. An item has to be an object of class derived from _ReflectionItem abstract class
+      
+      return $ret;
+    }
+    
+    
+    function setItem($key, $item){
+      $this->items[$key] = $item; 
+    }
+    
+    
+    function setItemUsingMethod($item, $method){
+      $this->items[$item->$method()] = $item; 
+    }
+  }
+  
+  
+  
+  class HRAnomalies extends _Array{
+    function __construct(){
+      parent::__construct(); 
+    }
+  }
+  
+  
+  class HRAnomaly{
+    public $timestampInterval; //object of TimestampInterval class
+    
+    
+    function __construct($timestampInterval){
+      $this->timestampInterval = $timestampInterval;
+    }
+  }
+  
+  
+  abstract class _ReflectionItem{
+    function __construct(){}
+    
+    
+    function callMethods($methodNames){//$methodNames can be either just one method name or an array of methods or even array of arrays. The return value depends on the object comming to this parameter. If it's scalar value, then just scalar value is returned. If it's an array, then array is returned and if it's array of arrays, then array of arrays is returned and so on ....
+      if(is_array($methodNames)){
+        $ret = array();
+        
+        foreach($methodNames as $methodName)
+          array_push($ret, $this->callMethods($methodName));
+      }
+      else
+        $ret = $this->$methodNames();
+        
+      return $ret;
+    }
+  }
+  
   
   class TCXFile{
+    public $hrAnomalies;
     public $timestampIntervalForModification;
     public $xml;
     public $xpathEngine;
@@ -105,8 +198,8 @@
     }
     
     
-    function getHRAnomalies(){
-      return (new TrackPoints($this))->getHRAnomalies();
+    function setHRAnomalies(){
+      $this->hrAnomalies = (new TrackPoints($this))->getHRAnomalies();
     }
     
     
@@ -146,10 +239,10 @@
       }
       
       if($latitudeShift)
-        $trackPoints->applyMethodOnTrackPoints("shiftLatitude", $latitudeShift);
+        $trackPoints->applyMethodOnItems("shiftLatitude", $latitudeShift);
       
       if($longitudeShift)
-        $trackPoints->applyMethodOnTrackPoints("shiftLongitude", $longitudeShift);
+        $trackPoints->applyMethodOnItems("shiftLongitude", $longitudeShift);
       
       echo $trackPoints->count() . " track point(s) were/was modified<br/>\n";
     }
@@ -162,15 +255,20 @@
 
   
   class TimestampInterval{
-    public $timestampFrom;
-    public $timestampTo;
-    public $error; //enum of class TimestampIntervalFromParametersErrorEnum
+    protected $timestampFrom;
+    protected $timestampTo;
+    protected $error; //enum of class TimestampIntervalFromParametersErrorEnum
     
     
     function __construct(){
       $this->timestampFrom = null;
       $this->timestampTo = null;
       $this->error = TimestampIntervalFromParametersErrorEnum::someOrBothBorderValuesOfIntervalNotDefined;
+    }
+    
+    
+    function __debugInfo(){
+      return ["timestampInterval" => $this->toString()]; 
     }
     
     
@@ -224,6 +322,19 @@
     function isError(){
       return ($this->error == TimestampIntervalFromParametersErrorEnum::noError) ? false : true; 
     }
+    
+    
+    function toString($includeDate = true){
+      if($this->isError())
+        return $this->getErrorMessage();
+      else{
+        $format = (($includeDate) ? "d.m.Y " : "") .  "H:i:s";
+        $from = (new DateTime())->setTimestamp($this->getTimeStampFrom())->format($format);
+        $to = (new DateTime())->setTimestamp($this->getTimeStampTo())->format($format);
+        
+        return $from . " - " . $to;
+      }
+    }
   }
 
 
@@ -234,38 +345,39 @@
   }  
 
   
-  class TrackPoints{
-    public $trackPoints; //array of TrackPoint
+  class TrackPoints extends _Array{
     public $tcxFile;
     
-    
+
     function __construct($tcxFile){
+      parent::__construct();
+      
       $this->tcxFile = $tcxFile;
       
-      $this->trackPoints = array(); 
       $trackPointNodes = $this->getXpathEngine()->query("//n:Trackpoint");
       
       foreach($trackPointNodes as $trackPointNode)
-        $this->add(new TrackPoint($trackPointNode, $this));
+        $this->setItemUsingMethod(new TrackPoint($trackPointNode, $this), "getTimestamp");
       
       $this->countMovingAverageWatts();
     }
-    
-    
-    function add($trackPoint){
-      $this->trackPoints[$trackPoint->getTimestamp()] = $trackPoint; 
-    }
 
     
-    function applyMethodOnTrackPoints($trackPointMethodName, $param){
-      foreach($this->trackPoints as $trackPoint){
-        $trackPoint->$trackPointMethodName($param);
+    function addVerticalLinesToGraph($graph){
+      $verticalLines = new VerticalLines($graph, $this->getArrayByItemMethods("getTimestamp"));
+      
+      $verticalLines->set2ItemsForTimestampInterval($this->tcxFile->timestampIntervalForModification, "green", "red");
+      
+      foreach($this->tcxFile->hrAnomalies->items as $hrAnomaly){
+        $verticalLines->set2ItemsForTimestampInterval($hrAnomaly->timestampInterval, "blue", "brown");
       }
+        
+      $verticalLines->addToGraph();
     }
     
     
     function areWattsAvailable(){
-      return ($this->count()) ? reset($this->trackPoints)->areWattsAvailable() : false;
+      return ($this->count()) ? reset($this->items)->areWattsAvailable() : false;
     }
     
 
@@ -273,10 +385,10 @@
       if($this->areWattsAvailable()){
         $sum = 0;
         $count = 0;
-        $leftBorderOfMovingWindowArray = $this->trackPoints;
+        $leftBorderOfMovingWindowArray = $this->items;
         $leftBorderOfMovingWindow = reset($leftBorderOfMovingWindowArray);
         
-        foreach($this->trackPoints as $trackPoint){
+        foreach($this->items as $trackPoint){
           $sum += $trackPoint->getWatts();
           $count++;
           
@@ -292,13 +404,8 @@
     }
     
     
-    function count(){
-      return count($this->trackPoints);   
-    }
-    
-    
     function displayGraph(){
-      $xs = $this->getArrayByTrackPointMethods("getTime");
+      $xs = $this->getArrayByItemMethods("getTime");
       $graphWidth = 1800;
 
       $graph = new Graph($graphWidth, 500);
@@ -308,12 +415,12 @@
       $graph->xaxis->SetTextTickInterval(ceil(20 / ($graphWidth / count($xs))));
       $graph->xaxis->SetLabelAngle(90);
 
-      $hrs = $this->getArrayByTrackPointMethods("getHR");
+      $hrs = $this->getArrayByItemMethods("getHR");
       $linePlotHR = new LinePlot($hrs);
       $graph->Add($linePlotHR);
       $linePlotHR->SetColor('red');
       
-      $altitudes = $this->getArrayByTrackPointMethods("getAltitude");
+      $altitudes = $this->getArrayByItemMethods("getAltitude");
       $linePlotAltitude = new LinePlot($altitudes);
       $graph->SetYScale(0, "lin");
       $graph->AddY(0, $linePlotAltitude);
@@ -321,14 +428,14 @@
       $graph->ynaxis[0]->SetColor('black');
       
       if($this->areWattsAvailable()){
-        $watts = $this->getArrayByTrackPointMethods("getWatts");
+        $watts = $this->getArrayByItemMethods("getWatts");
         $linePlotWatts = new LinePlot($watts);
         $graph->SetYScale(1, "lin");
         $graph->AddY(1, $linePlotWatts);
         $linePlotWatts->SetColor('green');                                                                                                                                              
         $graph->ynaxis[1]->SetColor('green');
         
-        $movingAverageWatts = $this->getArrayByTrackPointMethods("getMovingAverageWatts");
+        $movingAverageWatts = $this->getArrayByItemMethods("getMovingAverageWatts");
         $linePlotMovingAverageWatts = new LinePlot($movingAverageWatts);
         $graph->SetYScale(2, "lin");
         $graph->AddY(2, $linePlotMovingAverageWatts);
@@ -336,43 +443,19 @@
         $graph->ynaxis[2]->SetColor('magenta');
       }
       
-      $verticalLines = new VerticalLines($graph, $this->getArrayByTrackPointMethods("getTimestamp"));
-      
-      if(!($this->tcxFile->timestampIntervalForModification->isError())){
-        $verticalLines->addVerticalLine(new VerticalLine($verticalLines, $this->tcxFile->timestampIntervalForModification->timestampFrom, "green"));
-        $verticalLines->addVerticalLine(new VerticalLine($verticalLines, $this->tcxFile->timestampIntervalForModification->timestampTo, "red"));
-      }
-        
-      $verticalLines->addToGraph();
+      $this->addVerticalLinesToGraph($graph);
       
       displayGraph($graph);
     }
     
     
-    function getArrayByTrackPointMethods($trackPointMethodNames){//it returns array of values returned by TrackPoint::callMethods($trackPointMethodNames) calls - see definition of that method to understand the fact $trackPointMethodNames can be either a stringname of one method or an array of method names, or array of array ... and this everything influence the structure of the appropriate return value
-      $ret = array();
-      
-      foreach($this->trackPoints as $trackPoint)
-        array_push($ret, $trackPoint->callMethods($trackPointMethodNames));
-      
-      return $ret;
-    }
-    
-    
-    function getAggregationByTrackPointMethod($aggregationMethod, $trackPointMethodName){//example of usage: getAggregationByTrackPointMethod("min", "getHR"); ... finds the minimal HR
-      $values = $this->getArrayByTrackPointMethods($trackPointMethodName);
-      
-      return $aggregationMethod($values);
-    }
-
-    
     function getHRAnomalies(){
-      $minimalHRChangeInTimeRatioForAnomaly = 1; //minimal required ratio between HR change for the given time. Eg.: if it's = 2, then it's necessary HR changes for more than 10 in 5 seconds
+      $minimalHRChangeInTimeRatioForAnomaly = 0.5; //minimal required ratio between HR change for the given time. Eg.: if it's = 2, then it's necessary HR changes for more than 10 in 5 seconds
       $minimalHRChangeInForAnomaly = 5; // minimal change of HR for anomaly
 
-      $retAnomalies = array();
+      $hrAnomalies = new HRAnomalies();
       
-      $timeStampHRPairs = $this->getArrayByTrackPointMethods(["getTimeStamp", "getHR"]);
+      $timeStampHRPairs = $this->getArrayByItemMethods(["getTimeStamp", "getHR"]);
       $timeStampHRPairsCount = count($timeStampHRPairs);
     
       $indexRightShift = 1;
@@ -385,8 +468,9 @@
           if(abs($ratio) < $minimalHRChangeInTimeRatioForAnomaly){
             if($differenceInHR >= $minimalHRChangeInForAnomaly){
               if($indexRightShift > 1){
-                //array_push($retAnomalies, [$timeStampHRPairs[$i][0], $timeStampHRPairs[$i + $indexRightShift - 1][0]]);
-                array_push($retAnomalies, [(new DateTime())->setTimestamp($timeStampHRPairs[$i][0])->format("H:i:s"), (new DateTime())->setTimeStamp($timeStampHRPairs[$i + $indexRightShift - 1][0])->format("H:i:s")]);
+                $timestampInterval = new TimestampInterval();
+                $timestampInterval->initFromTimestamps($timeStampHRPairs[$i][0], $timeStampHRPairs[$i + $indexRightShift - 1][0]);
+                $hrAnomalies->addItem(new HRAnomaly($timestampInterval));
               }
             }
             break;
@@ -394,7 +478,7 @@
         }
       }
       
-      return $retAnomalies;
+      return $hrAnomalies;
    }
     
     
@@ -404,7 +488,7 @@
                                                                           
     
     function filterAccordingToTimestampInterval($timestampInterval, $preserve){//$preserve: true -> only trackPoints in interval remains; false -> only trackPoints not in interval remains
-      foreach($this->trackPoints as $trackPoint){
+      foreach($this->items as $trackPoint){
         $timestamp = $trackPoint->getTimestamp();
         $isInInterval = ($timestamp >= $timestampInterval->getTimestampFrom() && $timestamp <= $timestampInterval->getTimestampTo());
         
@@ -415,26 +499,26 @@
     
 
     function remove($trackPoint){
-      unset($this->trackPoints[$trackPoint->getTimestamp()]); 
+      unset($this->items[$trackPoint->getTimestamp()]); 
     }
    
     
     function setHRAccordingToMovingAverageWatts($hr, $timestampIntervalForTraining){//if ($hr == 0) then HR of the last trackPoint is used instead
       if($this->areWattsAvailable() && !$timestampIntervalForTraining->isError()){
         if($hr)
-          end($this->trackPoints)->setHR($hr);
+          end($this->items)->setHR($hr);
 
         $trainingTrackPoints = new TrackPoints($this->tcxFile);
         $trainingTrackPoints->filterAccordingToTimestampInterval($timestampIntervalForTraining, true);
         
         if($trainingTrackPoints->count() > 0){
-          $movingAverageWatts = $trainingTrackPoints->getArrayByTrackPointMethods(["getTimestamp", "getMovingAverageWatts"]);
-          $hrs = $trainingTrackPoints->getArrayByTrackPointMethods("getHR");
+          $movingAverageWatts = $trainingTrackPoints->getArrayByItemMethods(["getTimestamp", "getMovingAverageWatts"]);
+          $hrs = $trainingTrackPoints->getArrayByItemMethods("getHR");
           
           $ls = new LeastSquares();
           $ls->train($movingAverageWatts, $hrs);
   
-          foreach($this->trackPoints as $trackPoint){
+          foreach($this->items as $trackPoint){
             $trackPoint->setHR(round($ls->predict([$trackPoint->getTimestamp(), $trackPoint->getMovingAverageWatts()]))); 
           }
         }
@@ -450,13 +534,13 @@
       $trackPointsCount = $this->count();
       
       if($trackPointsCount){
-        $firstHR = reset($this->trackPoints)->getHR();
-        $lastHR = ($hr) ? $hr : end($this->trackPoints)->getHR();
+        $firstHR = reset($this->items)->getHR();
+        $lastHR = ($hr) ? $hr : end($this->items)->getHR();
         
         $step = ($lastHR - $firstHR) / ($trackPointsCount - 1);
         
         $hr = $firstHR;
-        foreach($this->trackPoints as $trackPoint){
+        foreach($this->items as $trackPoint){
           $trackPoint->setHR(round($hr));
           $hr += $step;
         }
@@ -466,12 +550,14 @@
   }
   
   
-  class TrackPoint{
+  class TrackPoint extends _ReflectionItem{
     public $domElement;
     public $trackPoints;
     public $movingAverageWatts;
     
     function __construct($domElement, $trackPoints){
+      parent::__construct();
+      
       $this->domElement = $domElement;
       $this->trackPoints = $trackPoints;
     }
@@ -481,20 +567,6 @@
       return !is_null($this->getWatts());
     }
 
-    
-    function callMethods($methodNames){//$methodNames can be either just one method name or an array of methods or even array of arrays. The return value depends on the object comming to this parameter. If it's scalar value, then just scalar value is returned. If it's an array, then array is returned and if it's array of arrays, then array of arrays is returned and so on ....
-      if(is_array($methodNames)){
-        $ret = array();
-        
-        foreach($methodNames as $methodName)
-          array_push($ret, $this->callMethods($methodName));
-      }
-      else
-        $ret = $this->$methodNames();
-        
-      return $ret;
-    }
-    
     
     function getAltitude(){
       return $this->getElement("n:AltitudeMeters")->nodeValue;
@@ -579,38 +651,15 @@
   }
   
   
-  class VerticalLines{
-    public $graph;
-    public $verticalLines;
-    public $firstGraphTimestamp;
-    
-    function __construct($graph, $timestamps){
-      $this->graph = $graph;
-      $this->verticalLines = array();
-      $this->firstGraphTimestamp = min($timestamps);
-    }
-    
-    
-    function addVerticalLine($verticalLine){
-      $this->verticalLines[$verticalLine->timestamp] = $verticalLine; 
-    }
-    
-    
-    function addToGraph(){
-      foreach($this->verticalLines as $verticalLine){
-        $verticalLine->addToGraph(); 
-      }
-    }
-  }
-  
-  
-  class VerticalLine{
+  class VerticalLine extends _ReflectionItem{
     public $color;
     public $timestamp;
     public $verticalLines;//parent
     
     
     function __construct($verticalLines, $timestamp, $color){
+      parent::__construct();
+      
       $this->verticalLines = $verticalLines;
       $this->timestamp = $timestamp;
       $this->color = $color;
@@ -619,6 +668,38 @@
     
     function addToGraph(){
       $this->verticalLines->graph->AddLine(new PlotLine(VERTICAL, ($this->timestamp - $this->verticalLines->firstGraphTimestamp), $this->color, 1)); 
+    }
+  }
+  
+  
+  class VerticalLines extends _Array{
+    public $graph;
+    public $firstGraphTimestamp;
+    
+    function __construct($graph, $timestamps){
+      parent::__construct();
+      
+      $this->graph = $graph;
+      $this->firstGraphTimestamp = min($timestamps);
+    }
+    
+    
+    function set2ItemsForTimestampInterval($timestampInterval, $colorFrom, $colorTo){
+      if($timestampInterval->isError())
+        return;
+      
+      $timestampFrom = $timestampInterval->getTimestampFrom();
+      $timestampTo = $timestampInterval->getTimestampTo();
+      
+      $this->setItem($timestampFrom, new VerticalLine($this, $timestampFrom, $colorFrom));
+      $this->setItem($timestampTo, new VerticalLine($this, $timestampTo, $colorTo));
+    }
+      
+    
+    function addToGraph(){
+      foreach($this->items as $verticalLine){
+        $verticalLine->addToGraph(); 
+      }
     }
   }
   
