@@ -452,29 +452,73 @@
     function getHRAnomalies(){
       $minimalHRChangeInTimeRatioForAnomaly = 0.5; //minimal required ratio between HR change for the given time. Eg.: if it's = 2, then it's necessary HR changes for more than 10 in 5 seconds
       $minimalHRChangeInForAnomaly = 5; // minimal change of HR for anomaly
+      $maximalTimeInSecondsForAnomalyDuration = 120;
 
+      $maximalTimeInSecondsForAnomalyStart = $minimalHRChangeInForAnomaly / $minimalHRChangeInTimeRatioForAnomaly;
+      
       $hrAnomalies = new HRAnomalies();
       
       $timeStampHRPairs = $this->getArrayByItemMethods(["getTimeStamp", "getHR"]);
       $timeStampHRPairsCount = count($timeStampHRPairs);
     
       $indexRightShift = 1;
-      for($i = 0; $i < $timeStampHRPairsCount; $i += $indexRightShift){
+      for($i = 0; $i < $timeStampHRPairsCount; $i++){
+        $leftTimestamp = $timeStampHRPairs[$i][0];
+        $leftHR = $timeStampHRPairs[$i][1];
+        $maxHRInWindow = $leftHR;
+        $minHRInWindow = $leftHR;
+        $maxHRInWindowIndexShift = 0;
+        $minHRInWindowIndexShift = 0;
+        $anomalyStartIndexRightShift = -1; //anomaly start hasn't been detected yet
+        $anomalyEndIndexRightShift = -1; //anomaly end hasn't been detected yet
+
         for($indexRightShift = 1; ($i + $indexRightShift) < $timeStampHRPairsCount; $indexRightShift++){
-          $differenceInSeconds = $timeStampHRPairs[$i + $indexRightShift][0] - $timeStampHRPairs[$i][0];
-          $differenceInHR = $timeStampHRPairs[$i + $indexRightShift][1] - $timeStampHRPairs[$i][1];
-          $ratio = $differenceInHR / $differenceInSeconds;
+          $rightTimestamp = $timeStampHRPairs[$i + $indexRightShift][0];
+          $rightHR = $timeStampHRPairs[$i + $indexRightShift][1];
           
-          if(abs($ratio) < $minimalHRChangeInTimeRatioForAnomaly){
-            if($differenceInHR >= $minimalHRChangeInForAnomaly){
-              if($indexRightShift > 1){
-                $timestampInterval = new TimestampInterval();
-                $timestampInterval->initFromTimestamps($timeStampHRPairs[$i][0], $timeStampHRPairs[$i + $indexRightShift - 1][0]);
-                $hrAnomalies->addItem(new HRAnomaly($timestampInterval));
-              }
-            }
+          $differenceInSeconds = $rightTimestamp - $leftTimestamp;
+          $differenceInHR = $rightHR - $leftHR;
+          
+          if($rightHR >= $maxHRInWindow){
+            $maxHRInWindow = $rightHR;
+            $maxHRInWindowIndexShift = $indexRightShift;
+          }
+          
+          if($rightHR <= $minHRInWindow){
+            $minHRInWindow = $rightHR;
+            $minHRInWindowIndexShift = $indexRightShift;
+          }
+          
+          if($differenceInSeconds <= $maximalTimeInSecondsForAnomalyStart && abs($differenceInHR) >= $minimalHRChangeInForAnomaly){//possible anomaly start (typically HR drop) detected
+            $anomalyStartIndexRightShift = ($differenceInHR < 0) ? $maxHRInWindowIndexShift : $minHRInWindowIndexShift;
             break;
           }
+        } 
+        
+        if($anomalyStartIndexRightShift != -1){//if anomaly start was detected
+          $anomalyStartTimestamp = $timeStampHRPairs[$i + $anomalyStartIndexRightShift][0];
+          $anomalyStartHR = $timeStampHRPairs[$i + $anomalyStartIndexRightShift][1];
+          
+          for($indexRightShift = $anomalyStartIndexRightShift + 1; ($i + $indexRightShift) < $timeStampHRPairsCount; $indexRightShift++){
+            $rightTimestamp = $timeStampHRPairs[$i + $indexRightShift][0];
+            $rightHR = $timeStampHRPairs[$i + $indexRightShift][1];
+            
+            if($rightTimestamp > $anomalyStartTimestamp + $maximalTimeInSecondsForAnomalyDuration)
+              break;
+            
+            if($rightHR >= $anomalyStartHR && $differenceInHR < 0 || $rightHR <= $anomalyStartHR && $differenceInHR >= 0){
+              $anomalyEndIndexRightShift = $indexRightShift;
+              break;
+            }
+          }
+        }
+            
+        if($anomalyEndIndexRightShift != -1){//if anomaly end was detected
+          $timestampInterval = new TimestampInterval();
+          $timestampInterval->initFromTimestamps($timeStampHRPairs[$i + $anomalyStartIndexRightShift][0], $timeStampHRPairs[$i + $anomalyEndIndexRightShift][0]);
+          $hrAnomalies->addItem(new HRAnomaly($timestampInterval));
+          
+          $i += $anomalyEndIndexRightShift;
         }
       }
       
