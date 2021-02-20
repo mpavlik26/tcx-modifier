@@ -17,67 +17,18 @@
   $movingAverageWindowSizeInSecond = 45; //it's used e.g. for moving average Watts ....
   
 
-  //INPUT PARAMETERS - begin:
-  
-  if($checkbox_preserveJustXth = inputCheckboxChecked("preserveJustXth"))
-    $xth = inputParamsNvl("xth", 1);
-  
-  $checkbox_setHR = inputCheckboxChecked("setHR");
-  $checkbox_shiftPositions = inputCheckboxChecked("shiftPositions");  
-  
-  $timestampIntervalForModification = new TimestampInterval();
-  $timestampIntervalForTraining = new TimestampInterval();
-  
-  if($checkbox_setHR || $checkbox_shiftPositions){
-    $timestampIntervalForModification->initFromParameters("timestampFrom", "timestampTo");
-    
-    if($timestampIntervalForModification->isError())
-      echo "There's a problem in specification of interval for modification: " . $timestampIntervalForModification->getErrorMessage() . "<br>\n";
-                                                                                                  
-    if($checkbox_setHR){
-      $timestampIntervalForTraining->initFromParameters("trainingTimestampFrom", "trainingTimestampTo");
-      
-      if($timestampIntervalForTraining->getError() == TimestampIntervalFromParametersErrorEnum::timestampFromIsGreaterThanTimestampTo)
-        echo "There's a problem in specification of interval for training: " . $timestampIntervalForTraining->getErrorMessage() . "<br>\n";
-    }
-  } 
-   
-  $hr = 0;
-  $shiftLatitude = 0;
-  $shiftLongitude = 0;
-  
-  if(!($timestampIntervalForModification->isError())){
-    if($checkbox_setHR)
-      $hr = inputParamsNvl("HR", 0);
-    
-    if($checkbox_shiftPositions){
-      $shiftLatitude = inputParamsNvl("shiftLatitude", 0);
-      $shiftLongitude = inputParamsNvl("shiftLongitude", 0);
-    }
-  }
-  
-  echo "<br/>\n";
-  //INPUT PARAMETERS - end
-
-  
   if(!move_uploaded_file($fileFromForm["tmp_name"], $uploadFileName))
     exit("Unable to save uploaded file to uploads dir");
 
     
-  $tcx = new TCXFile($uploadFileName, $timestampIntervalForModification);
+  $tcx = new TCXFile($uploadFileName);
 
   $tcx->setHRAnomalies();
   print_r($tcx->hrAnomalies);
-  
   $tcx->displayGraph();
   
-  if($checkbox_preserveJustXth)
-    $tcx->preserveJustXth($xth);
-  
-  $tcx->solveHRAnomalies();
-  
-  $tcx->modifyTrackPoints($checkbox_setHR, $hr, $timestampIntervalForTraining, $shiftLatitude, $shiftLongitude);
-
+  $tcx->preserveJustXth();
+  $tcx->modifyTrackPoints();
   $tcx->displayGraph();
   
   $tcx->save($targetFileName);
@@ -255,17 +206,81 @@
       parent::__construct();
       $this->timestampInterval = $timestampInterval;
     }
+    
+    
+    function getTimestampInterval(){
+      return $this->timestampInterval; 
+    }
+  }
+  
+  
+  class Parameters{
+    public $checkbox_eliminateHRAnomalies;
+    public $checkbox_preserveJustXth;
+    public $checkbox_setHR;
+    public $checkbox_shiftPositions;
+    public $hr;
+    public $shiftLatitude;
+    public $shiftLongitude;
+    public $timestampIntervalForModification;
+    public $timestampIntervalForTraining;
+    public $xth;
+
+    
+    function __construct(){
+      if($this->checkbox_preserveJustXth = inputCheckboxChecked("preserveJustXth"))
+        $this->xth = inputParamsNvl("xth", 1);
+  
+      $this->checkbox_eliminateHRAnomalies = inputCheckboxChecked("eliminateHRAnomalies");
+      $this->checkbox_setHR = inputCheckboxChecked("setHR");
+      $this->checkbox_shiftPositions = inputCheckboxChecked("shiftPositions");  
+  
+      $this->timestampIntervalForModification = new TimestampInterval();
+      $this->timestampIntervalForTraining = new TimestampInterval();
+  
+      if($this->checkbox_setHR || $this->checkbox_shiftPositions || $this->checkbox_eliminateHRAnomalies){
+        if(!$this->checkbox_eliminateHRAnomalies){
+          $this->timestampIntervalForModification->initFromParameters("timestampFrom", "timestampTo");
+    
+          if($this->timestampIntervalForModification->isError())
+            echo "There's a problem in specification of interval for modification: " . $this->timestampIntervalForModification->getErrorMessage() . "<br>\n";
+        }
+                                                                                                    
+        if($this->checkbox_setHR || $this->checkbox_eliminateHRAnomalies){
+          $this->timestampIntervalForTraining->initFromParameters("trainingTimestampFrom", "trainingTimestampTo");
+        
+          if($this->timestampIntervalForTraining->getError() == TimestampIntervalFromParametersErrorEnum::timestampFromIsGreaterThanTimestampTo)
+            echo "There's a problem in specification of interval for training: " . $this->timestampIntervalForTraining->getErrorMessage() . "<br>\n";
+        }
+      }
+   
+      $this->hr = 0;
+      $this->shiftLatitude = 0;
+      $this->shiftLongitude = 0;
+  
+      if(!($this->timestampIntervalForModification->isError())){
+        if($this->checkbox_setHR)
+          $this->hr = inputParamsNvl("HR", 0);
+    
+        if($this->checkbox_shiftPositions){
+          $this->shiftLatitude = inputParamsNvl("shiftLatitude", 0);
+          $this->shiftLongitude = inputParamsNvl("shiftLongitude", 0);
+        }
+      }
+    }
   }
   
   
   class TCXFile{
     public $hrAnomalies;
-    public $timestampIntervalForModification;
+    public $parameters;
     public $xml;
     public $xpathEngine;
     
     
-    function __construct($fileName, $timestampIntervalForModification){
+    function __construct($fileName){
+      $this->parameters = new Parameters();
+      
       $this->xml = new DomDocument();
       if(!$this->xml->load($fileName))
         exit("Unable to parse file '" . $fileName . "'");
@@ -273,8 +288,6 @@
       $this->xpathEngine = new DOMXpath($this->xml);
       $this->xpathEngine->registerNamespace("n", "http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2");
       $this->xpathEngine->registerNamespace("e", "http://www.garmin.com/xmlschemas/ActivityExtension/v2");
-      
-      $this->timestampIntervalForModification = $timestampIntervalForModification;
       
       $this->hrAnomalies = null;
     }
@@ -285,32 +298,41 @@
     }
     
     
-    function modifyTrackPoints($checkbox_setHR, $hr, $timestampIntervalForTraining, $latitudeShift, $longitudeShift){
-      if($this->timestampIntervalForModification->isError()) //if there's no timestamp interval for modification defined, no modification occurs
+    function modifyTrackPoints(){
+      if(!$this->parameters->checkbox_eliminateHRAnomalies && $this->parameters->timestampIntervalForModification->isError()) //if there's no timestamp interval for modification defined and hrAnomalyElimination checkbox is not checked, no modification occurs
         return;
       
-      $trackPoints = new TrackPoints($this);
+      $timestampIntervalsForModification = array();
+      if($this->parameters->checkbox_eliminateHRAnomalies)
+        $timestampIntervalsForModification = $this->hrAnomalies->getArrayByItemMethods("getTimestampInterval");
+      else
+        $timestampIntervalsForModification[0] = $this->parameters->timestampIntervalForModification;
       
-      $trackPoints->filterAccordingToTimestampInterval($this->timestampIntervalForModification, true);
-
-      if($checkbox_setHR){
-        if($trackPoints->areWattsAvailable() && !$timestampIntervalForTraining->isError())
-           $trackPoints->setHRAccordingToMovingAverageWatts($hr, $timestampIntervalForTraining);
-        else
-          $trackPoints->setProgressiveHR($hr);
+      for($i = 0; $i < count($timestampIntervalsForModification); $i++){
+        $trackPoints = new TrackPoints($this);
+        
+        $trackPoints->filterAccordingToTimestampInterval($timestampIntervalsForModification[$i], true);
+  
+        if($this->parameters->checkbox_setHR || $this->parameters->checkbox_eliminateHRAnomalies){
+          if($trackPoints->areWattsAvailable() && !$this->parameters->timestampIntervalForTraining->isError())
+             $trackPoints->setHRAccordingToMovingAverageWatts($this->parameters->hr, $this->parameters->timestampIntervalForTraining);
+          else
+            $trackPoints->setProgressiveHR($this->parameters->hr);
+        }
       }
       
-      if($latitudeShift)
-        $trackPoints->applyMethodOnItems("shiftLatitude", $latitudeShift);
+      if($this->parameters->shiftLatitude)
+        $trackPoints->applyMethodOnItems("shiftLatitude", $this->parameters->shiftLatitude);
       
-      if($longitudeShift)
-        $trackPoints->applyMethodOnItems("shiftLongitude", $longitudeShift);
-      
-      echo $trackPoints->count() . " track point(s) were/was modified<br/>\n";
+      if($this->parameters->shiftLongitude)
+        $trackPoints->applyMethodOnItems("shiftLongitude", $this->parameters->shiftLongitude);
     }
     
     
-    function preserveJustXth($xth){
+    function preserveJustXth(){
+      if(!$this->parameters->checkbox_preserveJustXth)
+        return;
+      
       $tracks = $this->xpathEngine->query("//n:Track");
       
       foreach($tracks as $track){
@@ -319,7 +341,7 @@
         
         $i = 0;
         foreach($trackpoints as $trackpoint){
-          if(($i % $xth && $i != $trackpoints->length - 1)){//preserve first, xth and last trackpoint elements
+          if(($i % $this->parameters->xth && $i != $trackpoints->length - 1)){//preserve first, xth and last trackpoint elements
             $parentNode = $trackpoint->parentNode;
             $parentNode->removeChild($trackpoint);
           } 
@@ -337,13 +359,6 @@
     
     function setHRAnomalies(){
       $this->hrAnomalies = new HRAnomalies(new TrackPoints($this));
-    }
-    
-    
-    function solveHRAnomalies(){
-      foreach($this->hrAnomalies->items as $hrAnomaly){
-        $this->modifyTrackPoints(true, 0, $hrAnomaly->timestampInterval, 0, 0);
-      }
     }
   }
 
@@ -460,7 +475,7 @@
     function addVerticalLinesToGraph($graph){
       $verticalLines = new VerticalLines($graph, $this->getArrayByItemMethods("getTimestamp"));
       
-      $verticalLines->set2ItemsForTimestampInterval($this->tcxFile->timestampIntervalForModification, "green", "red");
+      $verticalLines->set2ItemsForTimestampInterval($this->tcxFile->parameters->timestampIntervalForModification, "green", "red");
       
       foreach($this->tcxFile->hrAnomalies->items as $hrAnomaly){
         $verticalLines->set2ItemsForTimestampInterval($hrAnomaly->timestampInterval, "blue", "brown");
