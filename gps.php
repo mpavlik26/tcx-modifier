@@ -514,8 +514,20 @@
         }
             
         if($anomalyEndIndexRightShift != -1){//if anomaly end was detected
+          //fine tuning of start and end of anomalies (if it's possible to set start earlier or end later, do it)
+          $anomalyStartIndex = $i + $anomalyStartIndexRightShift;
+          $anomalyEndIndex = $i + $anomalyEndIndexRightShift;
+          
+          while($anomalyStartIndex > 0 && ($timeStampHRPairs[$anomalyStartIndex - 1][1] >= $timeStampHRPairs[$anomalyStartIndex][1] && $differenceInHR < 0 || $timeStampHRPairs[$anomalyStartIndex - 1][1] <= $timeStampHRPairs[$anomalyStartIndex][1] && $differenceInHR >= 0)){
+            $anomalyStartIndex--;
+          }
+            
+          while($anomalyEndIndex < $timeStampHRPairsCount - 1 && ($timeStampHRPairs[$anomalyEndIndex + 1][1] >= $timeStampHRPairs[$anomalyEndIndex][1] && $differenceInHR < 0 || $timeStampHRPairs[$anomalyEndIndex + 1][1] <= $timeStampHRPairs[$anomalyEndIndex][1] && $differenceInHR >= 0)){
+            $anomalyEndIndex++;
+          }
+          
           $timestampInterval = new TimestampInterval();
-          $timestampInterval->initFromTimestamps($timeStampHRPairs[$i + $anomalyStartIndexRightShift][0], $timeStampHRPairs[$i + $anomalyEndIndexRightShift][0]);
+          $timestampInterval->initFromTimestamps($timeStampHRPairs[$anomalyStartIndex][0], $timeStampHRPairs[$anomalyEndIndex][0]);
           $hrAnomalies->addItem(new HRAnomaly($timestampInterval));
           
           $i += $anomalyEndIndexRightShift;
