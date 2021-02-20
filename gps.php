@@ -110,12 +110,12 @@
   
   
   class HRAnomalies extends _Array{
-    function __construct($trackPoints){
+    function __construct($trackPoints, $onlyHRDrops){
       parent::__construct();
       
-      $minimalHRChangeInTimeRatioForAnomaly = 0.5; //minimal required ratio between HR change for the given time. Eg.: if it's = 2, then it's necessary HR changes for more than 10 in 5 seconds
+      $minimalHRChangeInTimeRatioForAnomaly = 0.75; //minimal required ratio between HR change for the given time. Eg.: if it's = 2, then it's necessary HR changes for more than 10 in 5 seconds
       $minimalHRChangeInForAnomaly = 5; // minimal change of HR for anomaly
-      $maximalTimeInSecondsForAnomalyDuration = 120;
+      $maximalTimeInSecondsForAnomalyDuration = 60;
 
       $maximalTimeInSecondsForAnomalyStart = $minimalHRChangeInForAnomaly / $minimalHRChangeInTimeRatioForAnomaly;
       
@@ -150,7 +150,7 @@
             $minHRInWindowIndexShift = $indexRightShift;
           }
           
-          if($differenceInSeconds <= $maximalTimeInSecondsForAnomalyStart && abs($differenceInHR) >= $minimalHRChangeInForAnomaly){//possible anomaly start (typically HR drop) detected
+          if($differenceInSeconds <= $maximalTimeInSecondsForAnomalyStart && (-$differenceInHR >= $minimalHRChangeInForAnomaly || !$onlyHRDrops && $differenceInHR >= $minimalHRChangeInForAnomaly)){//possible anomaly start (typically HR drop) detected
             $anomalyStartIndexRightShift = ($differenceInHR < 0) ? $maxHRInWindowIndexShift : $minHRInWindowIndexShift;
             break;
           }
@@ -167,7 +167,7 @@
             if($rightTimestamp > $anomalyStartTimestamp + $maximalTimeInSecondsForAnomalyDuration)
               break;
             
-            if($rightHR >= $anomalyStartHR && $differenceInHR < 0 || $rightHR <= $anomalyStartHR && $differenceInHR >= 0){
+            if($rightHR >= $anomalyStartHR && $differenceInHR < 0 || !$onlyHRDrops && $rightHR <= $anomalyStartHR && $differenceInHR >= 0){
               $anomalyEndIndexRightShift = $indexRightShift;
               break;
             }
@@ -179,11 +179,11 @@
           $anomalyStartIndex = $i + $anomalyStartIndexRightShift;
           $anomalyEndIndex = $i + $anomalyEndIndexRightShift;
           
-          while($anomalyStartIndex > 0 && ($timeStampHRPairs[$anomalyStartIndex - 1][1] >= $timeStampHRPairs[$anomalyStartIndex][1] && $differenceInHR < 0 || $timeStampHRPairs[$anomalyStartIndex - 1][1] <= $timeStampHRPairs[$anomalyStartIndex][1] && $differenceInHR >= 0)){
+          while($anomalyStartIndex > 0 && ($timeStampHRPairs[$anomalyStartIndex - 1][1] >= $timeStampHRPairs[$anomalyStartIndex][1] && $differenceInHR < 0 || !$onlyHRDrops && $timeStampHRPairs[$anomalyStartIndex - 1][1] <= $timeStampHRPairs[$anomalyStartIndex][1] && $differenceInHR >= 0)){
             $anomalyStartIndex--;
           }
             
-          while($anomalyEndIndex < $timeStampHRPairsCount - 1 && ($timeStampHRPairs[$anomalyEndIndex + 1][1] >= $timeStampHRPairs[$anomalyEndIndex][1] && $differenceInHR < 0 || $timeStampHRPairs[$anomalyEndIndex + 1][1] <= $timeStampHRPairs[$anomalyEndIndex][1] && $differenceInHR >= 0)){
+          while($anomalyEndIndex < $timeStampHRPairsCount - 1 && ($timeStampHRPairs[$anomalyEndIndex + 1][1] >= $timeStampHRPairs[$anomalyEndIndex][1] && $differenceInHR < 0 || !$onlyHRDrops && $timeStampHRPairs[$anomalyEndIndex + 1][1] <= $timeStampHRPairs[$anomalyEndIndex][1] && $differenceInHR >= 0)){
             $anomalyEndIndex++;
           }
           
@@ -216,6 +216,7 @@
   
   class Parameters{
     public $checkbox_eliminateHRAnomalies;
+    public $checkbox_onlyHRDrops;
     public $checkbox_preserveJustXth;
     public $checkbox_setHR;
     public $checkbox_shiftPositions;
@@ -232,6 +233,7 @@
         $this->xth = inputParamsNvl("xth", 1);
   
       $this->checkbox_eliminateHRAnomalies = inputCheckboxChecked("eliminateHRAnomalies");
+      $this->checkbox_onlyHRDrops = inputCheckboxChecked("onlyHRDrops");
       $this->checkbox_setHR = inputCheckboxChecked("setHR");
       $this->checkbox_shiftPositions = inputCheckboxChecked("shiftPositions");  
   
@@ -358,7 +360,7 @@
 
     
     function setHRAnomalies(){
-      $this->hrAnomalies = new HRAnomalies(new TrackPoints($this));
+      $this->hrAnomalies = new HRAnomalies(new TrackPoints($this), $this->parameters->checkbox_onlyHRDrops);
     }
   }
 
