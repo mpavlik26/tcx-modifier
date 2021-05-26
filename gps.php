@@ -360,7 +360,7 @@
 
     
     function setHRAnomalies(){
-      $this->hrAnomalies = new HRAnomalies(new TrackPoints($this), $this->parameters->checkbox_onlyHRDrops);
+      $this->hrAnomalies = ($this->parameters->checkbox_eliminateHRAnomalies) ? new HRAnomalies(new TrackPoints($this), $this->parameters->checkbox_onlyHRDrops) : null;
     }
   }
 
@@ -479,8 +479,10 @@
       
       $verticalLines->set2ItemsForTimestampInterval($this->tcxFile->parameters->timestampIntervalForModification, "green", "red");
       
-      foreach($this->tcxFile->hrAnomalies->items as $hrAnomaly){
-        $verticalLines->set2ItemsForTimestampInterval($hrAnomaly->timestampInterval, "blue", "brown");
+      if($this->tcxFile->hrAnomalies){
+        foreach($this->tcxFile->hrAnomalies->items as $hrAnomaly){
+          $verticalLines->set2ItemsForTimestampInterval($hrAnomaly->timestampInterval, "blue", "brown");
+        }
       }
         
       $verticalLines->addToGraph();
